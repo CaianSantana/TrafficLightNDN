@@ -30,7 +30,7 @@ namespace traffic {
                 const auto& [color_str, seconds] = colors_vector[index];
                 current_color = static_cast<traffic::Color>(index);
 
-                int time_left = seconds;
+                time_left = seconds;
                 int count = 0;
 
                 for (; time_left > 0; time_left--) {
@@ -63,12 +63,21 @@ namespace traffic {
             }
         }
 
+        void reviewRequest(float otherPriority){
+            if (this->hasLowerPriorityThan(otherPriority) && this->current_color == traffic::Color::GREEN) {
+                this->changeTime(true); 
+            }else if (this->hasLowerPriorityThan(otherPriority) && this->current_color == traffic::Color::RED){
+                this->changeTime(false); 
+            }
+        }
+        
     private:
         void calculatePriority() {
             priority = full_cicle_vehicles_quantity * 0.5f
                      + (static_cast<float>(vehicles) / capacity) * 10
                      + colors_vector[2].second;  // tempo do vermelho
         }
+        
 
         int generateNumber(int min, int max) {
             static std::mt19937 rng(std::chrono::system_clock::now().time_since_epoch().count());
@@ -87,6 +96,28 @@ namespace traffic {
             }
         }
 
+        bool hasLowerPriorityThan(float otherPriority){
+            if (priority<otherPriority)
+                return true;
+            return false;
+        }
+        void changeTime(bool isgreen){
+            if (colors_vector[0].second < 36 &&
+                colors_vector[2].second > 12 && 
+                !isgreen) {
+                colors_vector[0].second+=6;
+                colors_vector[2].second-=6;
+                std::cout << "Green time increased to " << colors_vector[0].second << " and Red time decreased to " << colors_vector[2].second << std::endl;
+            }else if(colors_vector[2].second < 36 &&
+                     colors_vector[0].second > 12 && 
+                     isgreen){
+                colors_vector[2].second+=6;
+                colors_vector[0].second-=6;
+                std::cout << "Red time increased to " << colors_vector[2].second << " and Green time decreased to " << colors_vector[0].second << std::endl;
+            }else{
+                std::cerr << "Invalid Operation." << std::endl;
+            }
+        }
     private:
         std::vector<std::pair<std::string, int>> colors_vector;
         int columns;
@@ -94,11 +125,24 @@ namespace traffic {
         int capacity;
         int vehicles = 0;
         int full_cicle_vehicles_quantity = 0;
+        int time_left;
         float priority = 0.0f;
         traffic::Status intensity;
         std::mutex mtx;
         traffic::Color current_color = traffic::Color::GREEN;
     };
+}
+
+void askPriority(traffic::SmartTrafficLight& trafficlight) {
+    while(true){
+        std::this_thread::sleep_for(std::chrono::seconds(30)); 
+        float priorityA = 50;
+        float priorityB = 20;
+
+        trafficlight.reviewRequest(priorityA);
+        trafficlight.reviewRequest(priorityB);
+    }
+    
 }
 
 int main(int argc, char** argv)
@@ -134,8 +178,12 @@ int main(int argc, char** argv)
     }
 
     traffic::SmartTrafficLight stl(columns, lines, intensity);
+
     std::thread temporizer(&traffic::SmartTrafficLight::run, &stl, start_color);
+    std::thread test(askPriority, std::ref(stl)); // passa por referência
+
     temporizer.join();
+    test.join();
 
     return 0;
 }
