@@ -11,7 +11,7 @@
 namespace traffic {
 
     enum class Status { NONE = 1, WEAK = 2, MEDIUM = 5, INTENSE = 8 };
-    enum class Color { NONE = 0, GREEN = 1, YELLOW = 2, RED = 3 };
+    enum class Color {GREEN = 0, YELLOW = 1, RED = 2, NONE = 3 };
 
     class SmartTrafficLight {
     public:
@@ -40,7 +40,6 @@ namespace traffic {
         bool hasLowerPriorityThan(float otherPriority);
         void changeTime(bool isgreen);
     };
-
 }
 
 #endif // SMARTTRAFFICLIGHT_HPP

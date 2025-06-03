@@ -5,7 +5,7 @@
 
 namespace traffic {
 
-    SmartTrafficLight::SmartTrafficLight(int columns, int lines, traffic::Status intensityLevel)
+    SmartTrafficLight::SmartTrafficLight::SmartTrafficLight(int columns, int lines, traffic::Status intensityLevel, traffic::Color start_color)
         : intensity(intensityLevel) 
     {
         colors_vector.push_back({"green", 24});
@@ -14,9 +14,10 @@ namespace traffic {
         this->columns = columns;
         this->lines = lines;
         capacity = columns * lines;
+        this->current_color, this->start_color = start_color;
     }
 
-    void SmartTrafficLight::start(traffic::Color start_color) {
+    void SmartTrafficLight::start() {
         size_t index = static_cast<size_t>(start_color);
         while (true) {
             const auto& [color_str, seconds] = colors_vector[index];

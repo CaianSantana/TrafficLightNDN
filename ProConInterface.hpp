@@ -20,7 +20,7 @@ class ProConInterface {
 public:
     virtual ~ProConInterface() = default;
 
-    virtual void setup(std::string prefix = "/prefixo/exemplo", int id) = 0;
+    virtual void setup(std::string prefix, int id) = 0;
     virtual void run(const std::string& url) = 0;
 
 protected:
@@ -32,11 +32,11 @@ protected:
 
     virtual void onTimeout(const Interest& interest) = 0;
 
-    virtual Interest createInterest(std::string url) = 0;
+    virtual Interest createInterest(const std::string& sufix) = 0;
 
     virtual void sendInterest(const Interest& interest) = 0;
 
-    virtual void runConsumer(std::string url) = 0;
+    virtual void runConsumer(const std::string& sufix) = 0;
 
     virtual void onInterest(const Interest& interest) = 0;
 
