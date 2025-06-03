@@ -23,6 +23,9 @@ class STLNDN : public traffic::SmartTrafficLight, public ndn::ProConInterface {
         {
             m_validator.load("trust-schema.conf");
         }
+        ~STLNDN() {
+            stopConsumerThread();
+        }
 
         void setup(std::string newPrefix, int newId){
             this->prefix = newPrefix;
@@ -43,11 +46,12 @@ class STLNDN : public traffic::SmartTrafficLight, public ndn::ProConInterface {
                 if (color_copy != last_color) {
                     if (color_copy == traffic::Color::GREEN) {
                         runProducer();
-                    } else if (color_copy == traffic::Color::RED) {
+                    } else if (color_copy == traffic::Color::RED && !recentConsume) {
                         runConsumer(sufix);
                     }
 
                     last_color = color_copy;
+                    recentConsume = false;
                 }
 
                 m_face.processEvents(ndn::time::milliseconds(10));
@@ -59,6 +63,13 @@ class STLNDN : public traffic::SmartTrafficLight, public ndn::ProConInterface {
 
 
     protected:
+
+        void stopConsumerThread() {
+            m_stopRequested = true;
+            if (m_consumerThread.joinable()) {
+                m_consumerThread.join();
+            }
+        }
         void runProducer(){
             std::cout << "Producing to prefix " << prefix+"/"+std::to_string(id) << std::endl;
             
@@ -75,19 +86,59 @@ class STLNDN : public traffic::SmartTrafficLight, public ndn::ProConInterface {
                                                         std::bind(&STLNDN::onRegisterFailed, this, _1, _2));
         };
         
-        void onData(const Interest&, const Data& data){}
+        void onData(const Interest&, const Data& data){
+            std::cout << "Received Data " << data << std::endl;
+            m_validator.validate(
+                data,
+                [] (const Data&) {
+                    std::cout << "Data conforms to trust schema" << std::endl;
+                },
+                [] (const Data&, const security::ValidationError& error) {
+                    std::cout << "Error authenticating data: " << error << std::endl;
+                    return;
+                }
+            );
 
-        void onNack(const Interest& interest, const lp::Nack& nack){}
+            std::string content(reinterpret_cast<const char*>(data.getContent().value()),
+                                data.getContent().value_size());
+            std::cout << ">> Content: " << content << std::endl;
 
-        void onTimeout(const Interest& interest){}
+            if (content.find("Accepted") != std::string::npos) {
+                std::cout << ">>> Request accepted. Proceeding with adjustments..." << std::endl;
+                recentConsume = true;
+                this->changeTime(true);
+            }
+            else if (content.find("Rejected") != std::string::npos) {
+                std::cout << ">>> Request rejected. Reason: " << content << std::endl;
+            }
+            else {
+                std::cout << ">>> Unknown response content." << std::endl;
+            }
 
-        Interest createInterest(const std::string& sufix){
-            Name interestName(prefix+"/"+sufix);
+            
+        }
+
+        void onNack(const Interest& interest, const lp::Nack& nack){
+            std::cout << "Received Nack with reason " << nack.getReason() << std::endl;
+                    if (nack.getReason() == lp::NackReason::NO_ROUTE){
+                        //interestStatus = InterestStatus::NOROUTE;
+                        return;
+                    }
+                    //interestStatus = InterestStatus::NACK;
+        }
+
+        void onTimeout(const Interest& interest){
+            std::cout << "Timeout for " << interest << std::endl;
+            //interestStatus = InterestStatus::TIMEOUT;
+        }
+
+        Interest createInterest(const std::string& sufix) {
+            Name interestName(prefix + "/" + sufix + "/request-green/" + std::to_string(priority));
             interestName.appendVersion();
 
             Interest interest(interestName);
             interest.setMustBeFresh(true);
-            interest.setInterestLifetime(6_s);
+            interest.setInterestLifetime(1_s);
             return interest;
         }
 
@@ -99,19 +150,77 @@ class STLNDN : public traffic::SmartTrafficLight, public ndn::ProConInterface {
         }
 
         void runConsumer(const std::string& sufix) {
-            std::cout << "Consuming to " << prefix+"/"+sufix << std::endl;
-            m_scheduler.schedule(6_s, [this, sufix] {
-                this->sendInterest(this->createInterest(sufix));
+            std::cout << "Consuming to " << prefix + "/" + sufix << std::endl;
 
-                if (current_color == traffic::Color::RED) {
-                    runConsumer(sufix);
+            if (m_consumerThread.joinable()) {
+                m_stopRequested = true;
+                m_consumerThread.join();
+                m_stopRequested = false;
+            }
+
+            m_consumerThread = std::thread([this, sufix] {
+                while (!m_stopRequested) {
+                    {
+                        std::lock_guard<std::mutex> lock(mtx);
+                        if (current_color != traffic::Color::RED || recentConsume) {
+                            break;
+                        }
+                    }
+
+                    this->calculatePriority();
+                    Interest interest = this->createInterest(sufix);
+                    this->sendInterest(interest);
+
+                    for (int i = 0; i < 60 && !m_stopRequested; ++i) // Espera até 6s, em passos de 100ms
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
             });
         }
 
-        void onInterest(const Interest& interest){}
 
-        void onRegisterFailed(const Name& prefix, const std::string& reason){}
+        void onInterest(const Interest& interest){
+            std::cout << "interest received\n";
+            std::cout << ">> I: " << interest << std::endl;
+
+            const Name& name = interest.getName();
+            std::string lastComponent = name.at(name.size() - 2).toUri(); // prioridade
+            std::string command = name.at(name.size() - 3).toUri();       // request-green, discovery, etc.
+
+            std::cout << "Command: " << command << ", Priority: " << lastComponent << std::endl;
+
+            auto data = std::make_shared<Data>();
+
+            data->setName(interest.getName());
+            data->setFreshnessPeriod(1_s);
+
+            if (command == "discovery") {
+                data->setContent(std::to_string(id));
+            } else if (command == "request-green") {
+                try {
+                    float otherPriority = std::stof(lastComponent);
+                    if(this->reviewRequest(otherPriority)){
+                        data->setContent("Accepted.");
+                    }else{
+                        data->setContent("Rejected.");
+                    }
+                    
+                } catch (const std::exception& e) {
+                    std::cerr << "Error parsing priority: " << e.what() << std::endl;
+                    data->setContent("Invalid priority format");
+                }
+            } else {
+                data->setContent("Unknown request");
+            }
+            m_keyChain.sign(*data);
+            std::cout << "<< D: " << *data << std::endl;
+            m_face.put(*data);
+        }
+
+        void onRegisterFailed(const Name& prefix, const std::string& reason){
+            std::cerr << "ERROR: Failed to register prefix '" << prefix
+                      << "' with the local forwarder (" << reason << ")\n";
+            m_face.shutdown();
+        }
 
     private:
         boost::asio::io_context m_ioCtx;
@@ -122,6 +231,10 @@ class STLNDN : public traffic::SmartTrafficLight, public ndn::ProConInterface {
         Scheduler m_scheduler{m_ioCtx};
         std::string prefix;
         int id;
+        bool recentConsume = false;
+        std::thread m_consumerThread;
+        std::atomic<bool> m_stopRequested = false;
+
 };
 
     

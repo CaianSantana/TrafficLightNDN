@@ -56,12 +56,15 @@ namespace traffic {
         }
     }
 
-    void SmartTrafficLight::reviewRequest(float otherPriority){
+    bool SmartTrafficLight::reviewRequest(float otherPriority){
         if (this->hasLowerPriorityThan(otherPriority) && this->current_color == traffic::Color::GREEN) {
-            this->changeTime(true); 
+            std::cout << "Ceding green time to neighbor\n";
+            this->changeTime(true);
+            return true;
         } else if (this->hasLowerPriorityThan(otherPriority) && this->current_color == traffic::Color::RED){
             this->changeTime(false); 
         }
+        return false;
     }
 
     void SmartTrafficLight::calculatePriority() {

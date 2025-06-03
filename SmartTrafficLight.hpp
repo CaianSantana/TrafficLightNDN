@@ -17,7 +17,7 @@ namespace traffic {
     public:
         SmartTrafficLight(int columns, int lines, traffic::Status intensityLevel, traffic::Color start_color = traffic::Color::GREEN);
         void start();
-        void reviewRequest(float otherPriority);
+        bool reviewRequest(float otherPriority);
 
     protected:
         std::vector<std::pair<std::string, int>> colors_vector;
@@ -32,13 +32,15 @@ namespace traffic {
         traffic::Color start_color;
         std::mutex mtx;
         traffic::Color current_color = traffic::Color::GREEN;
+        void changeTime(bool isgreen);
+        void calculatePriority();
 
     private:
-        void calculatePriority();
+        
         int generateNumber(int min, int max);
         void generateTraffic();
         bool hasLowerPriorityThan(float otherPriority);
-        void changeTime(bool isgreen);
+        
     };
 }
 
