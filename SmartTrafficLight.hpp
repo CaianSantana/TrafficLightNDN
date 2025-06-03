@@ -11,12 +11,12 @@
 namespace traffic {
 
     enum class Status { NONE = 1, WEAK = 2, MEDIUM = 5, INTENSE = 8 };
-    enum class Color { GREEN = 0, YELLOW = 1, RED = 2 };
+    enum class Color { NONE = 0, GREEN = 1, YELLOW = 2, RED = 3 };
 
     class SmartTrafficLight {
     public:
-        SmartTrafficLight(int columns, int lines, traffic::Status intensityLevel);
-        void run(traffic::Color start_color = traffic::Color::GREEN);
+        SmartTrafficLight(int columns, int lines, traffic::Status intensityLevel, traffic::Color start_color = traffic::Color::GREEN);
+        void start();
         void reviewRequest(float otherPriority);
 
     protected:
@@ -29,6 +29,7 @@ namespace traffic {
         int time_left;
         float priority = 0.0f;
         traffic::Status intensity;
+        traffic::Color start_color;
         std::mutex mtx;
         traffic::Color current_color = traffic::Color::GREEN;
 

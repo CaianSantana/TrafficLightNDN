@@ -16,7 +16,7 @@ namespace traffic {
         capacity = columns * lines;
     }
 
-    void SmartTrafficLight::run(traffic::Color start_color) {
+    void SmartTrafficLight::start(traffic::Color start_color) {
         size_t index = static_cast<size_t>(start_color);
         while (true) {
             const auto& [color_str, seconds] = colors_vector[index];
