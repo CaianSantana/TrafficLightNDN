@@ -24,7 +24,8 @@ public:
     virtual void run(const std::string& url) = 0;
 
 protected:
-    virtual void runProducer() = 0;
+
+    virtual void runConsumer(const std::string& sufix) = 0;
 
     virtual void onData(const Interest&, const Data& data) = 0;
 
@@ -32,16 +33,16 @@ protected:
 
     virtual void onTimeout(const Interest& interest) = 0;
 
-    virtual Interest createInterest(const std::string& sufix) = 0;
+    virtual Interest createInterest(ndn::Name& name, bool& mustBeFresh, bool& canBePrefix,  ndn::time& time) = 0;
 
     virtual void sendInterest(const Interest& interest) = 0;
 
-    virtual void runConsumer(const std::string& sufix) = 0;
+    virtual void runProducer(std::string& sufix = "") = 0;
 
     virtual void onInterest(const Interest& interest) = 0;
 
     virtual void onRegisterFailed(const Name& prefix, const std::string& reason) = 0;
 };
-} // namespace ndn
+}
 
-#endif // PROCONINTERFACE_HPP
+#endif 
