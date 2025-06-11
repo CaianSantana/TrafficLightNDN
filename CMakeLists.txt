@@ -27,12 +27,26 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(json)
 
 # Adiciona o executável e vincula bibliotecas
-add_executable(meu_tcc
-    main.cpp
+add_executable(orchestrator
+    mainOrchestrator.cpp
     Orchestrator.cpp
+    YamlParser.cpp
 )
 
-target_link_libraries(meu_tcc
+add_executable(trafficLight
+    mainSTL.cpp
+    STLNDN.cpp
+    YamlParser.cpp
+)
+
+target_link_libraries(orchestrator
+    ${NDN_LIBRARIES}  # linka com o ndn-cxx via pkg-config
+    yaml-cpp
+    nlohmann_json::nlohmann_json
+
+)
+
+target_link_libraries(trafficLight
     ${NDN_LIBRARIES}  # linka com o ndn-cxx via pkg-config
     yaml-cpp
     nlohmann_json::nlohmann_json
