@@ -167,9 +167,9 @@ bool Orchestrator::processIntersections(const std::vector<std::string>& candidat
           : 0;
 
         if (name == highestPriority) {
-          s.command = "increase_time";
+          s.command = "increase_time:10000";
         } else {
-          s.command = "decrease_time";
+          s.command = "decrease_time:10000";
         }
 
         if (remainingTime == 0) {
@@ -228,7 +228,7 @@ void Orchestrator::processGreenWave() {
       : 0;
 
     if (std::abs(static_cast<int64_t>(expectedTime - currentTime)) > 1000) {
-      s.command = "set_time_" + std::to_string(expectedTime);
+      s.command = "set_time:" + std::to_string(expectedTime);
     } else {
       s.command = "do_nothing";
     }
