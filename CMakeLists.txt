@@ -19,12 +19,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
 )
 FetchContent_MakeAvailable(yaml-cpp)
-FetchContent_Declare(
-  json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG v3.12.0
-)
-FetchContent_MakeAvailable(json)
+
 
 # Adiciona o executável e vincula bibliotecas
 add_executable(orchestrator
@@ -42,8 +37,6 @@ add_executable(orchestrator
 target_link_libraries(orchestrator
     ${NDN_LIBRARIES}  # linka com o ndn-cxx via pkg-config
     yaml-cpp
-    nlohmann_json::nlohmann_json
-
 )
 
 #target_link_libraries(trafficLight

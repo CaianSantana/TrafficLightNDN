@@ -92,29 +92,39 @@ void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) 
   steady_clock::duration rtt = now - it->second;
   interestTimestamps_.erase(it);
 
-  try {
-    auto json = nlohmann::json::parse(content);
-    std::string state = json.at("state").get<std::string>();
-    int remainingMs = json.at("remaining").get<int>();
+  
+  auto delimiter = '|';
+  std::istringstream iss(content);
+  std::string token;
 
-    int correctedRemainingMs = remainingMs - duration_cast<milliseconds>(rtt).count() / 2;
-    if (correctedRemainingMs < 0)
-      correctedRemainingMs = 0;
-
-    auto& tl = trafficLights_[trafficLightName];
-    tl.state = state;
-    tl.endTime = now + milliseconds(correctedRemainingMs);
-
-    if (json.contains("priority")) {
-      tl.priority = json.at("priority").get<int>();
-    }
-
-    reviewPriorities();
-
-  } catch (const std::exception& e) {
-    std::cerr << "Error parsing Data content: " << e.what() << std::endl;
+  std::vector<std::string> tokens;
+  while (std::getline(iss, token, delimiter)) {
+    tokens.push_back(token);
   }
-}
+
+  if (tokens.size() < 2) {
+    std::cerr << "Invalid message format: " << content << std::endl;
+    return;
+  }
+
+  std::string state = tokens[0];
+  int remainingMs = std::stoi(tokens[1]);
+
+  int correctedRemainingMs = remainingMs - duration_cast<milliseconds>(rtt).count() / 2;
+  if (correctedRemainingMs < 0)
+    correctedRemainingMs = 0;
+
+  auto& tl = trafficLights_[trafficLightName];
+  tl.state = state;
+  tl.endTime = now + milliseconds(correctedRemainingMs);
+
+  // Prioridade é opcional
+  if (tokens.size() >= 3) {
+    tl.priority = std::stoi(tokens[2]);
+  }
+
+  reviewPriorities();
+  }
 
 void Orchestrator::reviewPriorities() {
   auto candidates = getHigherPrioritySTL();

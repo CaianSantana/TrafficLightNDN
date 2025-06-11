@@ -13,7 +13,6 @@
 #include <ndn-cxx/util/time.hpp>
 #include <boost/asio/io_context.hpp>
 
-#include <nlohmann/json.hpp>
 
 #include <unordered_map>
 #include <string>
