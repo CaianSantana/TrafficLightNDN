@@ -1,6 +1,8 @@
 #ifndef ORCHESTRATOR_HPP
 #define ORCHESTRATOR_HPP
 
+#define MIN_PRIORITY 20
+
 #include "ProConInterface.hpp"
 #include <ndn-cxx/name.hpp>
 #include <ndn-cxx/face.hpp>
@@ -10,7 +12,6 @@
 #include <ndn-cxx/util/scheduler.hpp>
 #include <ndn-cxx/util/time.hpp>
 #include <boost/asio/io_context.hpp>
-
 
 #include <nlohmann/json.hpp>
 
@@ -29,7 +30,9 @@ public:
   Orchestrator();
   ~Orchestrator() override;
 
-  void loadTopology(std::map<std::string, TrafficLightState> trafficLights, std::map<std::string, Intersection> intersections);
+  void loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
+                    const std::map<std::string, Intersection>& intersections);
+
   void setup(const std::string& prefix) override;
   void run() override;
 
@@ -41,7 +44,8 @@ protected:
   void onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) override;
   void onTimeout(const ndn::Interest& interest) override;
 
-  ndn::Interest createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) override;
+  ndn::Interest createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix,
+                               ndn::time::milliseconds lifetime) override;
   void sendInterest(const ndn::Interest& interest) override;
 
   void onInterest(const ndn::Interest& interest) override;
@@ -49,12 +53,16 @@ protected:
 
 private:
   void produceClockData(const ndn::Interest& interest);
-  void produceCommand(std::string semaforoName, const ndn::Interest& interest);
+  void produceCommand(const std::string& trafficLightName, const ndn::Interest& interest);
   void reviewPriorities();
+  std::vector<std::string> getHigherPrioritySTL();
+  bool processIntersections(const std::vector<std::string>& candidates);
+  void processGreenWave();
 
 private:
   std::map<std::string, TrafficLightState> trafficLights_;
   std::map<std::string, Intersection> intersections_;
+  std::map<std::string, std::vector<std::string>> waveGroups_;
   boost::asio::io_context m_ioCtx;
   ndn::Face m_face{m_ioCtx};
   ndn::KeyChain m_keyChain;
@@ -66,6 +74,7 @@ private:
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
   std::mutex mutex_; 
   uint64_t clockTimestampMs_ = 0;
+  std::string lastModified;
 };
 
 #endif // ORCHESTRATOR_HPP

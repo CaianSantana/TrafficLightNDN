@@ -14,11 +14,39 @@ void Orchestrator::setup(const std::string& prefix) {
   prefix_ = std::move(prefix);
 }
 
-void Orchestrator::loadTopology(std::map<std::string, TrafficLightState> trafficLights,
-                                std::map<std::string, Intersection> intersections)
+void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
+                    const std::map<std::string, Intersection>& intersections)
 {
     trafficLights_ = trafficLights;
+    for (auto& [name, state] : trafficLights_) {
+      state.command = "do_nothing";
+    }
+
     intersections_ = intersections;
+    waveGroups_.clear();
+
+    for (const auto& [name, state] : trafficLights_) {
+        std::size_t lastSlash = name.rfind('/');
+        if (lastSlash == std::string::npos) continue;
+
+        std::string prefix = name.substr(0, lastSlash);
+        waveGroups_[prefix].push_back(name);
+    }
+
+    for (auto& [prefix, group] : waveGroups_) {
+        std::sort(group.begin(), group.end(), [](const std::string& a, const std::string& b) {
+            int idA = std::stoi(a.substr(a.rfind('/') + 1));
+            int idB = std::stoi(b.substr(b.rfind('/') + 1));
+            return idA < idB;
+        });
+    }
+
+    std::cout << "[loadTopology] Green waves detected:\n";
+    for (const auto& [prefix, group] : waveGroups_) {
+        std::cout << " - " << prefix << ": ";
+        for (const auto& name : group) std::cout << name << " ";
+        std::cout << std::endl;
+    }
 }
 
 void Orchestrator::run() {
@@ -38,14 +66,13 @@ void Orchestrator::runProducer(const std::string& suffix){
         this->onRegisterFailed(nameSuffix, reason);
       });
   auto cert = m_keyChain.getPib().getDefaultIdentity().getDefaultKey().getDefaultCertificate();
-                    m_certServeHandle = m_face.setInterestFilter(security::extractIdentityFromCertName(cert.getName()),
-                                                                [this, cert] (auto&&...) {
-                                                                m_face.put(cert);
-                                                                },
-                                                                std::bind(&Orchestrator::onRegisterFailed, this, _1, _2));
-  std::cout << "Producing to" << nameSuffix << std::endl;                                                                
+  m_certServeHandle = m_face.setInterestFilter(security::extractIdentityFromCertName(cert.getName()),
+                                                [this, cert] (auto&&...) {
+                                                  m_face.put(cert);
+                                                },
+                                                std::bind(&Orchestrator::onRegisterFailed, this, _1, _2));
+  std::cout << "Producing to " << nameSuffix << std::endl;                                                                
 }
-
 
 void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) {
   using namespace std::chrono;
@@ -53,35 +80,31 @@ void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) 
 
   std::string content(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
   std::string nameStr = interest.getName().toUri();
-  std::string semaforoName = interest.getName().at(-2).toUri();
+  std::string trafficLightName = interest.getName().at(-2).toUri();
 
   auto it = interestTimestamps_.find(nameStr);
   if (it == interestTimestamps_.end()) {
-    std::cerr << "Timestamp de envio do Interest não encontrado: " << nameStr << std::endl;
+    std::cerr << "Interest timestamp not found: " << nameStr << std::endl;
     return;
   }
 
   steady_clock::time_point now = steady_clock::now();
   steady_clock::duration rtt = now - it->second;
-  interestTimestamps_.erase(it); // Limpa para não acumular lixo
+  interestTimestamps_.erase(it);
 
   try {
     auto json = nlohmann::json::parse(content);
-
     std::string state = json.at("state").get<std::string>();
-    int remainingMs = json.at("remaining").get<int>(); // tempo restante informado
+    int remainingMs = json.at("remaining").get<int>();
 
-    // Corrigido com RTT (dividido por 2, pois RTT é ida e volta)
     int correctedRemainingMs = remainingMs - duration_cast<milliseconds>(rtt).count() / 2;
-
     if (correctedRemainingMs < 0)
       correctedRemainingMs = 0;
 
-    auto& tl = trafficLights_[semaforoName];
+    auto& tl = trafficLights_[trafficLightName];
     tl.state = state;
     tl.endTime = now + milliseconds(correctedRemainingMs);
 
-    // Prioridade (pode ou não estar no JSON, dependendo do seu formato)
     if (json.contains("priority")) {
       tl.priority = json.at("priority").get<int>();
     }
@@ -89,53 +112,149 @@ void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) 
     reviewPriorities();
 
   } catch (const std::exception& e) {
-    std::cerr << "Erro ao processar o conteúdo do Data: " << e.what() << std::endl;
+    std::cerr << "Error parsing Data content: " << e.what() << std::endl;
   }
 }
 
 void Orchestrator::reviewPriorities() {
-  // Exemplo: só printa o maior valor
-  int maxPriority = -1;
-  std::string maxName;
-  for (const auto& [name, state] : trafficLights_) {
-    if (state.priority > maxPriority) {
-      maxPriority = state.priority;
-      maxName = name;
-    }
-  }
-  std::cout << "Semáforo com maior prioridade: " << maxName << " = " << maxPriority << std::endl;
+  auto candidates = getHigherPrioritySTL();
+  if (candidates.empty()) return;
 
-  // TODO: definir comandos para cada semáforo baseado na prioridade
-  // Exemplo: se maior prioridade, comando "increase_time", outros "do_nothing"
-  for (auto& [name, state] : trafficLights_) {
-    if (name == maxName) {
-      state.command = "increase_time";
-    }
-    else {
-      state.command = "do_nothing";
+  if (processIntersections(candidates)) return;
+
+  processGreenWave();
+}
+
+std::vector<std::string> Orchestrator::getHigherPrioritySTL() {
+  std::vector<std::string> candidates;
+  for (const auto& [name, state] : trafficLights_) {
+    if (state.priority >= MIN_PRIORITY) {
+      candidates.push_back(name);
     }
   }
+  return candidates;
+}
+
+bool Orchestrator::processIntersections(const std::vector<std::string>& candidates) {
+  for (const auto& [interName, inter] : intersections_) {
+    std::vector<std::string> open, closed;
+    std::string highestPriority;
+    int maxPriority = -1;
+
+    for (const std::string& name : inter.trafficLightNames) {
+      if (std::find(candidates.begin(), candidates.end(), name) != candidates.end()) {
+        const auto& s = trafficLights_[name];
+
+        if (s.state == "green") open.push_back(name);
+        else closed.push_back(name);
+
+        if (s.priority > maxPriority) {
+          maxPriority = s.priority;
+          highestPriority = name;
+        }
+      }
+    }
+
+    if (!open.empty() && !closed.empty()) {
+      auto now = std::chrono::steady_clock::now();
+
+      for (const std::string& name : inter.trafficLightNames) {
+        auto& s = trafficLights_[name];
+
+        auto dur = s.endTime - now;
+        uint64_t remainingTime = (s.endTime > now)
+          ? std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
+          : 0;
+
+        if (name == highestPriority) {
+          s.command = "increase_time";
+        } else {
+          s.command = "decrease_time";
+        }
+
+        if (remainingTime == 0) {
+          s.command = "do_nothing";
+        }
+      }
+
+      lastModified = highestPriority;
+      return true;
+    }
+  }
+  return false;
+}
+
+void Orchestrator::processGreenWave() {
+  if (lastModified.empty()) return;
+
+  const std::string& baseName = lastModified;
+  std::size_t lastSlash = baseName.rfind('/');
+  if (lastSlash == std::string::npos) return;
+
+  std::string prefix = baseName.substr(0, lastSlash);
+  auto it = waveGroups_.find(prefix);
+  if (it == waveGroups_.end()) return;
+
+  const std::vector<std::string>& group = it->second;
+  auto& baseTrafficLight = trafficLights_[baseName];
+  auto now = std::chrono::steady_clock::now();
+
+  uint64_t baseRemaining = (baseTrafficLight.endTime > now)
+    ? std::chrono::duration_cast<std::chrono::milliseconds>(baseTrafficLight.endTime - now).count()
+    : 0;
+
+  constexpr int X = 5000;
+
+  int baseIndex = -1;
+  for (int i = 0; i < group.size(); ++i) {
+    if (group[i] == baseName) {
+      baseIndex = i;
+      break;
+    }
+  }
+
+  if (baseIndex == -1) return;
+
+  for (int i = 0; i < group.size(); ++i) {
+    const std::string& name = group[i];
+    if (name == baseName) continue;
+
+    auto& s = trafficLights_[name];
+    int dist = i - baseIndex;
+    uint64_t expectedTime = baseRemaining + dist * X;
+
+    uint64_t currentTime = (s.endTime > now)
+      ? std::chrono::duration_cast<std::chrono::milliseconds>(s.endTime - now).count()
+      : 0;
+
+    if (std::abs(static_cast<int64_t>(expectedTime - currentTime)) > 1000) {
+      s.command = "set_time_" + std::to_string(expectedTime);
+    } else {
+      s.command = "do_nothing";
+    }
+  }
+  lastModified = "";
 }
 
 void Orchestrator::onInterest(const ndn::Interest& interest) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-    if (interest.getName().size() >= 1 
-    && interest.getName().at(-1).toUri() == "clock"){
-        return produceClockData(interest);
-    } else if (interest.getName().size() >= 2 
-    && interest.getName().get(-2).toUri() == "command"){
-        std::string semaforoName = interest.getName().at(-1).toUri();
+  if (interest.getName().size() >= 1 
+      && interest.getName().at(-1).toUri() == "clock") {
+    return produceClockData(interest);
+  } else if (interest.getName().size() >= 2 
+             && interest.getName().get(-2).toUri() == "command") {
+    std::string trafficLightName = interest.getName().at(-1).toUri();
 
-        if (!trafficLights_.count(semaforoName)) {
-            std::cerr << "Semáforo desconhecido para comando: " << semaforoName << std::endl;
-            return;
-        }
-        return produceCommand(semaforoName, interest);
-    } else{
-        std::cerr << "Sufixo inválido.\n";
-        return;
+    if (!trafficLights_.count(trafficLightName)) {
+      std::cerr << "Unknown traffic light for command: " << trafficLightName << std::endl;
+      return;
     }
+    return produceCommand(trafficLightName, interest);
+  } else {
+    std::cerr << "Invalid suffix.\n";
+    return;
+  }
 }
 
 void Orchestrator::produceClockData(const ndn::Interest& interest) {
@@ -153,8 +272,8 @@ void Orchestrator::produceClockData(const ndn::Interest& interest) {
   m_face.put(*data);
 }
 
-void Orchestrator::produceCommand(std::string semaforoName, const ndn::Interest& interest){
-  std::string cmd = trafficLights_[semaforoName].command;
+void Orchestrator::produceCommand(const std::string& trafficLightName, const ndn::Interest& interest) {
+  std::string cmd = trafficLights_[trafficLightName].command;
 
   auto data = std::make_shared<ndn::Data>(interest.getName());
   data->setContent(std::string_view(cmd));  
@@ -165,19 +284,19 @@ void Orchestrator::produceCommand(std::string semaforoName, const ndn::Interest&
 }
 
 void Orchestrator::onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) {
-  std::cerr << "Nack recebido: " << interest.getName().toUri() << " Reason: " << nack.getReason() << std::endl;
+  std::cerr << "Nack received: " << interest.getName().toUri() << " Reason: " << nack.getReason() << std::endl;
 }
 
 void Orchestrator::onTimeout(const ndn::Interest& interest) {
-  std::cerr << "Timeout de Interest: " << interest.getName().toUri() << std::endl;
+  std::cerr << "Interest timeout: " << interest.getName().toUri() << std::endl;
 }
 
 ndn::Interest Orchestrator::createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) {
-    ndn::Interest interest(name);
-    interest.setMustBeFresh(mustBeFresh);
-    interest.setCanBePrefix(canBePrefix);
-    interest.setInterestLifetime(lifetime);
-    return interest;
+  ndn::Interest interest(name);
+  interest.setMustBeFresh(mustBeFresh);
+  interest.setCanBePrefix(canBePrefix);
+  interest.setInterestLifetime(lifetime);
+  return interest;
 }
 
 void Orchestrator::sendInterest(const ndn::Interest& interest) {
@@ -192,18 +311,18 @@ void Orchestrator::sendInterest(const ndn::Interest& interest) {
 }
 
 void Orchestrator::runConsumer() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& [name, state] : trafficLights_) {
-        ndn::Name interestName(prefix_);
-        interestName.append(name).append("priority");
-
-        std::cout << "Asking Data from " << name << std::endl;
-        sendInterest(createInterest(interestName, true, false, ndn::time::seconds(2)));
-
+     m_scheduler.schedule(5000_ms, [this] {
+    for (const auto& [name, state] : trafficLights_) {
+      Name interestName(name);
+      auto interest = createInterest(interestName, true, false, 1000_ms);
+      sendInterest(interest);
+      std::cout << "[Consumer] Asking Data from " << name << std::endl;
     }
-    m_scheduler.schedule(ndn::time::seconds(2), [this]{ runConsumer(); });
+    // Reagendar
+    runConsumer();
+  });
 }
 
 void Orchestrator::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
-  std::cerr << "Falha ao registrar nome: " << nome.toUri() << " motivo: " << reason << std::endl;
+  std::cerr << "Failed to register name: " << nome.toUri() << " Reason: " << reason << std::endl;
 }
