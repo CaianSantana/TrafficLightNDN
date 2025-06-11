@@ -1,0 +1,21 @@
+#pragma once
+
+#include <yaml-cpp/yaml.h>
+#include <string>
+#include <map>
+#include <iostream>
+#include "Structs.hpp"
+
+class YamlParser {
+public:
+    YamlParser(const std::string& filepath);
+
+    const std::map<std::string, TrafficLightState>& getTrafficLights() const;
+    const std::map<std::string, Intersection>& getIntersections() const;
+
+private:
+    std::map<std::string, TrafficLightState> trafficLights;
+    std::map<std::string, Intersection> intersections;
+
+    void parse(const YAML::Node& config);
+};
