@@ -1,8 +1,8 @@
-#include "YamlParser.hpp"
-#include "Orchestrator.hpp" 
+#include "../include/YamlParser.hpp"
+#include "../include/Orchestrator.hpp" 
 
 int main() {
-    YamlParser parser("../test.yaml");
+    YamlParser parser("../config/test.yaml");
 
     auto semaforos = parser.getTrafficLights();
     auto cruzamentos = parser.getIntersections();

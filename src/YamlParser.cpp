@@ -1,4 +1,4 @@
-#include "YamlParser.hpp"
+#include "../include/YamlParser.hpp"
 
 YamlParser::YamlParser(const std::string& filepath) {
     YAML::Node config = YAML::LoadFile(filepath);

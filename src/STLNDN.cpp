@@ -1,14 +1,5 @@
-#include <ndn-cxx/face.hpp>
-#include <ndn-cxx/security/key-chain.hpp>
-#include <ndn-cxx/util/scheduler.hpp>
-#include <ndn-cxx/security/validator-config.hpp>
-#include <ndn-cxx/lp/nack.hpp>
-#include <ndn-cxx/util/logger.hpp>
-#include <ndn-cxx/name.hpp>
-
-
-#include "SmartTrafficLight.hpp"
-#include "ProConInterface.hpp"
+#include "../include/SmartTrafficLight.hpp"
+#include "../include/ProConInterface.hpp"
 
 using namespace ndn;
 using namespace traffic;

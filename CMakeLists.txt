@@ -28,9 +28,9 @@ FetchContent_MakeAvailable(json)
 
 # Adiciona o executável e vincula bibliotecas
 add_executable(orchestrator
-    mainOrchestrator.cpp
-    Orchestrator.cpp
-    YamlParser.cpp
+    main/mainOrchestrator.cpp
+    src/Orchestrator.cpp
+    src/YamlParser.cpp
 )
 
 #add_executable(trafficLight

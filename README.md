@@ -49,15 +49,15 @@ nfd-stop
 
 ## 2. Criação do arquivo `trust-schema.conf`
 
-O arquivo `trust-schema.conf` é usado para configurar as regras de confiança para a validação dos certificados e Data packets.
+O arquivo `config/trust-schema.conf` é usado para configurar as regras de confiança para a validação dos certificados e Data packets.
 
 ### Por que criar esse arquivo?
 
 Sem uma configuração adequada do esquema de confiança, o NFD e as bibliotecas de segurança do NDN não conseguem validar as assinaturas, resultando em erros durante a execução dos produtores e consumidores.
 
-### Exemplo básico de `trust-schema.conf`:
+### Exemplo básico de `config/trust-schema.conf`:
 
-Crie o arquivo `trust-schema.conf` com o seguinte conteúdo:
+Crie o arquivo `config/trust-schema.conf` com o seguinte conteúdo:
 
 ```
 <trust-anchor>
@@ -112,47 +112,22 @@ ndnsec sign-req /example/testApp | ndnsec cert-gen -s /example -i example | ndns
 
 ## 4. Compilação e execução
 
-### 4.1 Producer
-
-#### 4.1.1 Compilação do Producer
-
-Compile o arquivo `producer.cpp` com os seguintes flags para ligar as bibliotecas necessárias:
-
-```bash
-g++ producer.cpp -o producer -lndn-cxx -lboost_system -lcrypto -lssl
-```
-
-#### 4.1.2 Execução do Producer
-
-Para executar:
-
-```bash
-./producer
-```
-
-Se tudo estiver correto, o produtor registrará o prefixo `/example/testApp/randomData` e começará a responder a Interests.
-
----
-
-### 4.2 Consumer
-
-#### 4.2.1 Compilação do Consumer
-
-Compile o arquivo `consumer.cpp` de forma similar:
+### 4.1 Compilação
 
 ```bash
 cd build/
 export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
 cmake ..
-g++ consumer.cpp -o consumer -lndn-cxx -lboost_system -lcrypto -lssl
+make
 ```
 
-#### 4.2.2 Execução do Consumer
 
-Execute o consumidor para enviar Interests e receber Data:
+### 4.2 Execução do Orchestrator
+
+Execute o Orquestrador:
 
 ```bash
-./consumer
+./orchestrator
 ```
 
 ---
@@ -175,4 +150,3 @@ Execute o consumidor para enviar Interests e receber Data:
 
 ---
 
-Se precisar de ajuda para configurar ou entender alguma etapa, só avisar!

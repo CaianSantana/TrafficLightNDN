@@ -1,4 +1,4 @@
-#include "SmartTrafficLight.hpp"
+#include "../include/SmartTrafficLight.hpp"
 #include <random>
 #include <chrono>
 #include <unistd.h>

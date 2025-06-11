@@ -1,9 +1,9 @@
-#include "Orchestrator.hpp"
+#include "../include/Orchestrator.hpp"
 
 Orchestrator::Orchestrator() 
    : m_validator(m_face)
 {
-    m_validator.load("../trust-schema.conf");
+    m_validator.load("../config/trust-schema.conf");
 }
 
 Orchestrator::~Orchestrator() {
