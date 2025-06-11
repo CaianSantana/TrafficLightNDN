@@ -3,43 +3,45 @@
 
 #include "ProConInterface.hpp"
 #include <ndn-cxx/name.hpp>
+#include <ndn-cxx/face.hpp>
 #include <ndn-cxx/security/key-chain.hpp>
+#include <ndn-cxx/security/signing-helpers.hpp>
+#include <ndn-cxx/security/validator-config.hpp>
 #include <ndn-cxx/util/scheduler.hpp>
 #include <ndn-cxx/util/time.hpp>
+#include <boost/asio/io_context.hpp>
+
+
 #include <nlohmann/json.hpp>
+
 #include <unordered_map>
 #include <string>
 #include <chrono>
 #include <mutex>
 #include <iostream>
+#include "Structs.hpp"
 
-
-struct TrafficLightState {
-  std::string name;
-  std::string state; 
-  std::chrono::steady_clock::time_point endTime;
-  int priority; 
-  std::string command; 
-  bool intersection;
-};
+using namespace ndn;
+using namespace ndn::security;
 
 class Orchestrator : public ndn::ProConInterface {
 public:
   Orchestrator();
   ~Orchestrator() override;
 
-  void setup(std::string prefix, int id) override;
-  void run(const std::string& url) override;
+  void loadTopology(std::map<std::string, TrafficLightState> trafficLights, std::map<std::string, Intersection> intersections);
+  void setup(const std::string& prefix) override;
+  void run() override;
 
 protected:
-  void runProducer(const std::string& suffix); // alterado para aceitar sufixo
-  void runConsumer(const std::string& suffix) override;
+  void runProducer(const std::string& suffix) override;
+  void runConsumer() override;
 
   void onData(const ndn::Interest&, const ndn::Data& data) override;
   void onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) override;
   void onTimeout(const ndn::Interest& interest) override;
 
-  ndn::Interest createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime);
+  ndn::Interest createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) override;
   void sendInterest(const ndn::Interest& interest) override;
 
   void onInterest(const ndn::Interest& interest) override;
@@ -48,18 +50,21 @@ protected:
 private:
   void produceClockData(const ndn::Interest& interest);
   void produceCommand(std::string semaforoName, const ndn::Interest& interest);
-  void loadTopology();
   void reviewPriorities();
 
 private:
-  std::unordered_map<std::string, TrafficLightState> trafficLights_;
-  ndn::KeyChain keyChain_;
-  ndn::Face face_;
-  ndn::Scheduler scheduler_;
+  std::map<std::string, TrafficLightState> trafficLights_;
+  std::map<std::string, Intersection> intersections_;
+  boost::asio::io_context m_ioCtx;
+  ndn::Face m_face{m_ioCtx};
+  ndn::KeyChain m_keyChain;
+  ndn::ScopedRegisteredPrefixHandle m_certServeHandle;
+  ndn::ValidatorConfig m_validator;
+  ndn::Scheduler m_scheduler{m_ioCtx};
   std::string prefix_;
   int id_;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
-  std::mutex mutex_; // para sincronizar acesso a trafficLights_
+  std::mutex mutex_; 
   uint64_t clockTimestampMs_ = 0;
 };
 

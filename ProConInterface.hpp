@@ -18,30 +18,24 @@
 namespace ndn {
 class ProConInterface {
 public:
-    virtual ~ProConInterface() = default;
+  virtual ~ProConInterface() = default;
 
-    virtual void setup(std::string prefix, int id) = 0;
-    virtual void run(const std::string& url) = 0;
+  virtual void setup(const std::string& prefix) = 0;
+  virtual void run() = 0;
 
 protected:
+  virtual void runProducer(const std::string& suffix) = 0;
+  virtual void runConsumer() = 0;
 
-    virtual void runConsumer(const std::string& sufix) = 0;
+  virtual void onData(const ndn::Interest&, const ndn::Data&) = 0;
+  virtual void onNack(const ndn::Interest&, const ndn::lp::Nack&) = 0;
+  virtual void onTimeout(const ndn::Interest&) = 0;
 
-    virtual void onData(const Interest&, const Data& data) = 0;
+  virtual ndn::Interest createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) = 0;
+  virtual void sendInterest(const ndn::Interest&) = 0;
 
-    virtual void onNack(const Interest& interest, const lp::Nack& nack) = 0;
-
-    virtual void onTimeout(const Interest& interest) = 0;
-
-    virtual Interest createInterest(ndn::Name& name, bool& mustBeFresh, bool& canBePrefix,  ndn::time& time) = 0;
-
-    virtual void sendInterest(const Interest& interest) = 0;
-
-    virtual void runProducer(std::string& sufix = "") = 0;
-
-    virtual void onInterest(const Interest& interest) = 0;
-
-    virtual void onRegisterFailed(const Name& prefix, const std::string& reason) = 0;
+  virtual void onInterest(const ndn::Interest&) = 0;
+  virtual void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) = 0;
 };
 }
 

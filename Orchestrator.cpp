@@ -1,43 +1,49 @@
 #include "Orchestrator.hpp"
 
-Orchestrator::Orchestrator()
-  : face_(boost::asio::make_strand(boost::asio::io_context())),
-    scheduler_(face_.getIoService())
-{}
+Orchestrator::Orchestrator() 
+   : m_validator(m_face)
+{
+    m_validator.load("../trust-schema.conf");
+}
 
 Orchestrator::~Orchestrator() {
-  face_.shutdown();
+  m_face.shutdown();
 }
 
-void Orchestrator::setup(std::string prefix, int id) {
+void Orchestrator::setup(const std::string& prefix) {
   prefix_ = std::move(prefix);
-  id_ = id;
-
-  loadTopology();
 }
 
-void Orchestrator::loadTopology(){
-    // TODO: carregar topologia do arquivo YAML (mock exemplo)
-    trafficLights_["semaforoA"] = {"semaforoA", "RED", std::chrono::steady_clock::now(), std::chrono::steady_clock::now(), 0, ""};
-    trafficLights_["semaforoB"] = {"semaforoB", "GREEN", std::chrono::steady_clock::now(), std::chrono::steady_clock::now(), 0, ""};
+void Orchestrator::loadTopology(std::map<std::string, TrafficLightState> trafficLights,
+                                std::map<std::string, Intersection> intersections)
+{
+    trafficLights_ = trafficLights;
+    intersections_ = intersections;
 }
 
-void Orchestrator::run(const std::string& url) {
-    scheduler_.schedule(ndn::time::seconds(1), [this]{ runConsumer(); });
+void Orchestrator::run() {
+    m_scheduler.schedule(ndn::time::seconds(1), [this]{ runConsumer(); });
     runProducer("command");
     runProducer("clock");
-    face_.processEvents();
+    m_face.processEvents();
 }
 
 void Orchestrator::runProducer(const std::string& suffix){
-  ndn::Name nameSufix = ndn::Name(prefix_).append(sufix);
-  face_.setInterestFilter(nameSufix,
+  ndn::Name nameSuffix = ndn::Name(prefix_).append(suffix);
+  m_face.setInterestFilter(nameSuffix,
       [this](const ndn::InterestFilter& filter, const ndn::Interest& interest) {
         this->onInterest(interest);
       },
-      [this](const ndn::Name& nameSufix, const std::string& reason) {
-        this->onRegisterFailed(nameSufix, reason);
+      [this](const ndn::Name& nameSuffix, const std::string& reason) {
+        this->onRegisterFailed(nameSuffix, reason);
       });
+  auto cert = m_keyChain.getPib().getDefaultIdentity().getDefaultKey().getDefaultCertificate();
+                    m_certServeHandle = m_face.setInterestFilter(security::extractIdentityFromCertName(cert.getName()),
+                                                                [this, cert] (auto&&...) {
+                                                                m_face.put(cert);
+                                                                },
+                                                                std::bind(&Orchestrator::onRegisterFailed, this, _1, _2));
+  std::cout << "Producing to" << nameSuffix << std::endl;                                                                
 }
 
 
@@ -139,23 +145,23 @@ void Orchestrator::produceClockData(const ndn::Interest& interest) {
   std::string timeStr = std::to_string(nowMs);
   clockTimestampMs_ = nowMs;
 
-
   auto data = std::make_shared<ndn::Data>(interest.getName());
-  data->setContent(reinterpret_cast<const uint8_t*>(timeStr.data()), timeStr.size());
+  data->setContent(std::string_view(timeStr));  
   data->setFreshnessPeriod(ndn::time::seconds(1));
 
-  keyChain_.sign(*data);
-  face_.put(*data);
+  m_keyChain.sign(*data);
+  m_face.put(*data);
 }
 
 void Orchestrator::produceCommand(std::string semaforoName, const ndn::Interest& interest){
-    std::string cmd = trafficLights_[semaforoName].command;
-    auto data = std::make_shared<ndn::Data>(interest.getName());
-    data->setContent(reinterpret_cast<const uint8_t*>(cmd.data()), cmd.size());
-    data->setFreshnessPeriod(ndn::time::seconds(1));
+  std::string cmd = trafficLights_[semaforoName].command;
 
-    keyChain_.sign(*data);
-    face_.put(*data);
+  auto data = std::make_shared<ndn::Data>(interest.getName());
+  data->setContent(std::string_view(cmd));  
+  data->setFreshnessPeriod(ndn::time::seconds(1));
+
+  m_keyChain.sign(*data);
+  m_face.put(*data);
 }
 
 void Orchestrator::onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) {
@@ -179,7 +185,7 @@ void Orchestrator::sendInterest(const ndn::Interest& interest) {
     std::lock_guard<std::mutex> lock(mutex_);
     interestTimestamps_[interest.getName().toUri()] = std::chrono::steady_clock::now();
   }
-  face_.expressInterest(interest,
+  m_face.expressInterest(interest,
                         std::bind(&Orchestrator::onData, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&Orchestrator::onNack, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&Orchestrator::onTimeout, this, std::placeholders::_1));
@@ -191,9 +197,11 @@ void Orchestrator::runConsumer() {
         ndn::Name interestName(prefix_);
         interestName.append(name).append("priority");
 
+        std::cout << "Asking Data from " << name << std::endl;
         sendInterest(createInterest(interestName, true, false, ndn::time::seconds(2)));
+
     }
-    scheduler_.schedule(ndn::time::seconds(2), [this]{ runConsumer(); });
+    m_scheduler.schedule(ndn::time::seconds(2), [this]{ runConsumer(); });
 }
 
 void Orchestrator::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
