@@ -45,26 +45,52 @@ void Orchestrator::runProducer(const std::string& suffix){
 
 
 void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::string content(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
+  using namespace std::chrono;
+  std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string semaforoName = interest.getName().at(-2).toUri();
+  std::string content(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
+  std::string nameStr = interest.getName().toUri();
+  std::string semaforoName = interest.getName().at(-2).toUri();
 
-    try {
-        int priority = std::stoi(content);
-        trafficLights_[semaforoName].priority = priority;
-    } catch (const std::exception& e) {
-        std::cerr << "Erro ao converter prioridade recebida: " << e.what() << std::endl;
+  auto it = interestTimestamps_.find(nameStr);
+  if (it == interestTimestamps_.end()) {
+    std::cerr << "Timestamp de envio do Interest não encontrado: " << nameStr << std::endl;
+    return;
+  }
+
+  steady_clock::time_point now = steady_clock::now();
+  steady_clock::duration rtt = now - it->second;
+  interestTimestamps_.erase(it); // Limpa para não acumular lixo
+
+  try {
+    auto json = nlohmann::json::parse(content);
+
+    std::string state = json.at("state").get<std::string>();
+    int remainingMs = json.at("remaining").get<int>(); // tempo restante informado
+
+    // Corrigido com RTT (dividido por 2, pois RTT é ida e volta)
+    int correctedRemainingMs = remainingMs - duration_cast<milliseconds>(rtt).count() / 2;
+
+    if (correctedRemainingMs < 0)
+      correctedRemainingMs = 0;
+
+    auto& tl = trafficLights_[semaforoName];
+    tl.state = state;
+    tl.endTime = now + milliseconds(correctedRemainingMs);
+
+    // Prioridade (pode ou não estar no JSON, dependendo do seu formato)
+    if (json.contains("priority")) {
+      tl.priority = json.at("priority").get<int>();
     }
 
-    if (trafficLights_.count(semaforoName)) {
-        trafficLights_[semaforoName].priority = priority;
-    }
+    reviewPriorities();
 
-    checkPriorities();
-    }
+  } catch (const std::exception& e) {
+    std::cerr << "Erro ao processar o conteúdo do Data: " << e.what() << std::endl;
+  }
+}
 
-void Orchestrator::checkPriorities() {
+void Orchestrator::reviewPriorities() {
   // Exemplo: só printa o maior valor
   int maxPriority = -1;
   std::string maxName;
@@ -152,10 +178,14 @@ ndn::Interest Orchestrator::createInterest(ndn::Name& name, bool mustBeFresh, bo
 }
 
 void Orchestrator::sendInterest(const ndn::Interest& interest) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    interestTimestamps_[interest.getName().toUri()] = std::chrono::steady_clock::now();
+  }
   face_.expressInterest(interest,
-    [this](const ndn::Interest& interest, const ndn::Data& data) { onData(interest, data); },
-    [this](const ndn::Interest& interest, const ndn::lp::Nack& nack) { onNack(interest, nack); },
-    [this](const ndn::Interest& interest) { onTimeout(interest); });
+                        std::bind(&Orchestrator::onData, this, std::placeholders::_1, std::placeholders::_2),
+                        std::bind(&Orchestrator::onNack, this, std::placeholders::_1, std::placeholders::_2),
+                        std::bind(&Orchestrator::onTimeout, this, std::placeholders::_1));
 }
 
 void Orchestrator::runConsumer() {

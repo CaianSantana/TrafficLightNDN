@@ -5,6 +5,7 @@
 #include <ndn-cxx/name.hpp>
 #include <ndn-cxx/security/key-chain.hpp>
 #include <ndn-cxx/util/scheduler.hpp>
+#include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <string>
 #include <chrono>
@@ -12,11 +13,11 @@
 
 struct TrafficLightState {
   std::string name;
-  std::string state; // ex: "GREEN", "YELLOW", "RED"
-  std::chrono::steady_clock::time_point startTime;
+  std::string state; 
   std::chrono::steady_clock::time_point endTime;
-  int priority; // prioridade vinda do semáforo
-  std::string command; // comando que Orchestrator quer enviar
+  int priority; 
+  std::string command; 
+  bool intersection;
 };
 
 class Orchestrator : public ndn::ProConInterface {
@@ -45,7 +46,7 @@ private:
   void produceClockData(const ndn::Interest& interest);
   void produceCommand(std::string semaforoName, const ndn::Interest& interest);
   void loadTopology();
-  void checkPriorities();
+  void reviewPriorities();
 
 private:
   std::unordered_map<std::string, TrafficLightState> trafficLights_;
@@ -54,7 +55,7 @@ private:
   ndn::Scheduler scheduler_;
   std::string prefix_;
   int id_;
-
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
   std::mutex mutex_; // para sincronizar acesso a trafficLights_
   uint64_t clockTimestampMs_ = 0;
 };

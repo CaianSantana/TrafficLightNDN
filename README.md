@@ -141,6 +141,9 @@ Se tudo estiver correto, o produtor registrará o prefixo `/example/testApp/rand
 Compile o arquivo `consumer.cpp` de forma similar:
 
 ```bash
+cd build/
+export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+cmake ..
 g++ consumer.cpp -o consumer -lndn-cxx -lboost_system -lcrypto -lssl
 ```
 
