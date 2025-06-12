@@ -122,6 +122,7 @@ void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) 
   if (tokens.size() >= 3) {
     tl.priority = std::stoi(tokens[2]);
   }
+  tl.timeOutCounter=0;
 
   reviewPriorities();
   }
@@ -132,13 +133,29 @@ void Orchestrator::reviewPriorities() {
 
   if (processIntersections(candidates)) return;
 
-  processGreenWave();
+  if (processGreenWave()) return;
+
+  // Individual fallback
+  for (const auto& name : candidates) {
+    auto& s = trafficLights_[name];
+
+    if (s.isUnknown()) {
+      s.command = "set_state:ALERT";
+    }
+    else if (s.isAlert()) {
+      s.command = "set_state:green";
+      s.command += ";set_time:21000";  // tempo padrão
+    }
+    else {
+      s.command = "increase_time:5000";
+    }
+  }
 }
 
 std::vector<std::string> Orchestrator::getHigherPrioritySTL() {
   std::vector<std::string> candidates;
   for (const auto& [name, state] : trafficLights_) {
-    if (state.priority >= MIN_PRIORITY) {
+    if (state.priority >= MIN_PRIORITY || state.isUnknown() || state.isAlert()) {
       candidates.push_back(name);
     }
   }
@@ -147,7 +164,7 @@ std::vector<std::string> Orchestrator::getHigherPrioritySTL() {
 
 bool Orchestrator::processIntersections(const std::vector<std::string>& candidates) {
   for (const auto& [interName, inter] : intersections_) {
-    std::vector<std::string> open, closed;
+    std::vector<std::string> open, closed, unknown, alert;
     std::string highestPriority;
     int maxPriority = -1;
 
@@ -156,6 +173,8 @@ bool Orchestrator::processIntersections(const std::vector<std::string>& candidat
         const auto& s = trafficLights_[name];
 
         if (s.state == "green") open.push_back(name);
+        else if (s.isUnknown()) unknown.push_back(name);
+        else if (s.isAlert()) alert.push_back(name);
         else closed.push_back(name);
 
         if (s.priority > maxPriority) {
@@ -163,6 +182,28 @@ bool Orchestrator::processIntersections(const std::vector<std::string>& candidat
           highestPriority = name;
         }
       }
+    }
+
+    if (!unknown.empty()) {
+      for (const std::string& name : inter.trafficLightNames) {
+        auto& s = trafficLights_[name];
+        if (!s.isUnknown()) {
+          s.command = "set_state:ALERT";
+        }
+      }
+      return true;
+    }
+
+    if (alert.size() >= 2) {
+      for (const std::string& name : alert) {
+        auto& s = trafficLights_[name];
+        if (name == highestPriority) {
+          s.command = "set_state:green;set_time:21000";
+        } else {
+          s.command = "set_state:red;set_time:24000"; 
+        }
+      }
+      return true;
     }
 
     if (!open.empty() && !closed.empty()) {
@@ -194,18 +235,26 @@ bool Orchestrator::processIntersections(const std::vector<std::string>& candidat
   return false;
 }
 
-void Orchestrator::processGreenWave() {
-  if (lastModified.empty()) return;
+
+bool Orchestrator::processGreenWave() {
+  if (lastModified.empty()) return false;
 
   const std::string& baseName = lastModified;
   std::size_t lastSlash = baseName.rfind('/');
-  if (lastSlash == std::string::npos) return;
+  if (lastSlash == std::string::npos) return false;
 
   std::string prefix = baseName.substr(0, lastSlash);
   auto it = waveGroups_.find(prefix);
-  if (it == waveGroups_.end()) return;
+  if (it == waveGroups_.end()) return false;
 
   const std::vector<std::string>& group = it->second;
+
+  for (const auto& name : group) {
+    if (trafficLights_[name].isUnknown()) {
+      return false;
+    }
+  }
+
   auto& baseTrafficLight = trafficLights_[baseName];
   auto now = std::chrono::steady_clock::now();
 
@@ -223,7 +272,7 @@ void Orchestrator::processGreenWave() {
     }
   }
 
-  if (baseIndex == -1) return;
+  if (baseIndex == -1) return false;
 
   for (int i = 0; i < group.size(); ++i) {
     const std::string& name = group[i];
@@ -243,8 +292,11 @@ void Orchestrator::processGreenWave() {
       s.command = "do_nothing";
     }
   }
+
   lastModified = "";
+  return true;
 }
+
 
 void Orchestrator::onInterest(const ndn::Interest& interest) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -291,14 +343,25 @@ void Orchestrator::produceCommand(const std::string& trafficLightName, const ndn
 
   m_keyChain.sign(*data);
   m_face.put(*data);
+  trafficLights_[trafficLightName].command = "do_nothing";
 }
 
 void Orchestrator::onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) {
   std::cerr << "Nack received: " << interest.getName().toUri() << " Reason: " << nack.getReason() << std::endl;
+  std::string trafficLightName = interest.getName().at(-2).toUri();
+  auto& tl = trafficLights_[trafficLightName];
+  tl.command="set_state:UNKNOWN";
 }
 
 void Orchestrator::onTimeout(const ndn::Interest& interest) {
   std::cerr << "Interest timeout: " << interest.getName().toUri() << std::endl;
+  std::string trafficLightName = interest.getName().at(-2).toUri();
+  auto& tl = trafficLights_[trafficLightName];
+  tl.timeOutCounter++;
+  if (tl.timeOutCounter>=2){
+    tl.command="set_state:UNKNOWN";
+  }
+  
 }
 
 ndn::Interest Orchestrator::createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) {
@@ -323,6 +386,9 @@ void Orchestrator::sendInterest(const ndn::Interest& interest) {
 void Orchestrator::runConsumer() {
      m_scheduler.schedule(5000_ms, [this] {
     for (const auto& [name, state] : trafficLights_) {
+      if (state.isUnknown()){
+        continue;
+      }
       Name interestName(name);
       auto interest = createInterest(interestName, true, false, 1000_ms);
       sendInterest(interest);

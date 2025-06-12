@@ -7,11 +7,20 @@
 
 struct TrafficLightState {
     std::string name;
-    std::string state = "vermelho";
+    std::string state = "RED";
     std::chrono::steady_clock::time_point endTime;
     int priority = 0;
     std::string command;
     bool intersection = false;
+    int timeOutCounter = 0;
+
+    bool isUnknown() const {
+        return state == "UNKNOWN";
+    }
+
+    bool isAlert() const {
+        return state == "ALERT";
+    }
 };
 
 struct Intersection {

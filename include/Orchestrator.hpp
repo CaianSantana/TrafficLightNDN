@@ -56,7 +56,7 @@ private:
   void reviewPriorities();
   std::vector<std::string> getHigherPrioritySTL();
   bool processIntersections(const std::vector<std::string>& candidates);
-  void processGreenWave();
+  bool processGreenWave();
 
 private:
   std::map<std::string, TrafficLightState> trafficLights_;
