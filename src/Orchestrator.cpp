@@ -23,30 +23,35 @@ void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& 
     }
 
     intersections_ = intersections;
-    waveGroups_.clear();
-
-    for (const auto& [name, state] : trafficLights_) {
-        std::size_t lastSlash = name.rfind('/');
-        if (lastSlash == std::string::npos) continue;
-
-        std::string prefix = name.substr(0, lastSlash);
-        waveGroups_[prefix].push_back(name);
+    std::cout << "[DEBUG] Semáforos carregados:" << std::endl;
+    for (const auto& [name, _] : trafficLights_) {
+      std::cout << " - " << name << std::endl;
     }
 
-    for (auto& [prefix, group] : waveGroups_) {
-        std::sort(group.begin(), group.end(), [](const std::string& a, const std::string& b) {
-            int idA = std::stoi(a.substr(a.rfind('/') + 1));
-            int idB = std::stoi(b.substr(b.rfind('/') + 1));
-            return idA < idB;
-        });
-    }
+    //waveGroups_.clear();
 
-    std::cout << "[loadTopology] Green waves detected:\n";
-    for (const auto& [prefix, group] : waveGroups_) {
-        std::cout << " - " << prefix << ": ";
-        for (const auto& name : group) std::cout << name << " ";
-        std::cout << std::endl;
-    }
+    //for (const auto& [name, state] : trafficLights_) {
+    //    std::size_t lastSlash = name.rfind('/');
+    //    if (lastSlash == std::string::npos) continue;
+    //
+    //    std::string prefix = name.substr(0, lastSlash);
+    //    waveGroups_[prefix].push_back(name);
+    //}
+
+    //for (auto& [prefix, group] : waveGroups_) {
+    //    std::sort(group.begin(), group.end(), [](const std::string& a, const std::string& b) {
+    //        int idA = std::stoi(a.substr(a.rfind('/') + 1));
+    //        int idB = std::stoi(b.substr(b.rfind('/') + 1));
+    //        return idA < idB;
+    //    });
+    //}
+
+    //std::cout << "[loadTopology] Green waves detected:\n";
+    //for (const auto& [prefix, group] : waveGroups_) {
+    //    std::cout << " - " << prefix << ": ";
+    //    for (const auto& name : group) std::cout << name << " ";
+    //    std::cout << std::endl;
+    //}
 }
 
 void Orchestrator::run() {
@@ -124,116 +129,127 @@ void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) 
   }
   tl.timeOutCounter=0;
 
-  reviewPriorities();
+  delegateCommandTo(trafficLightName);
   }
 
-void Orchestrator::reviewPriorities() {
-  auto candidates = getHigherPrioritySTL();
-  if (candidates.empty()) return;
+void Orchestrator::delegateCommandTo(const std::string& name) {
+  auto it = trafficLights_.find(name);
+  if (it == trafficLights_.end()) return;
 
-  if (processIntersections(candidates)) return;
+  auto& s = it->second;
 
-  if (processGreenWave()) return;
+  if (s.priority < MIN_PRIORITY && !s.isUnknown() && !s.isAlert()) {
+    s.command = "set_time:DEFAULT";
+    return;
+  }
+  if (s.priority < this->getAveragePrioritySTL()) {
+    return; 
+  }
 
-  // Individual fallback
-  for (const auto& name : candidates) {
+ 
+  for (const auto& [interName, inter] : intersections_) {
+    if (inter.contains(name)) {
+      handleIntersectionLogic(interName);
+      return;
+    }
+  }
+
+  if (s.state == "green") {
+    s.command = "increase_time:5000";
+  } else if (s.state == "red") {
+    s.command = "decrease_time:3000"; 
+  } else if (s.isAlert()) {
+    s.command = "set_state:green;set_time:21000";
+  } else if (s.isUnknown()) {
+    s.command = "set_state:ALERT";
+  } else {
+    s.command = "do_nothing";
+  }
+}
+
+
+int Orchestrator::getAveragePrioritySTL() {
+  std::vector<std::string> candidates;
+  int averageSum;
+  for (const auto& [name, state] : trafficLights_) {
+    candidates.push_back(name);
+    averageSum+=state.priority;
+  }
+  return averageSum/candidates.size();
+}
+
+void Orchestrator::handleIntersectionLogic(const std::string& intersectionName) {
+  updatePriorityList(intersectionName);
+
+  auto& sortedByPriority = sortedPriorityCache_[intersectionName];
+  if (sortedByPriority.empty())
+    return;
+
+  const int TVD_BASE = 15000;
+  const int TVD_BONUS = 5000;
+  const int TA = 3000;
+
+  size_t NSP = sortedByPriority.size();
+
+  for (size_t i = 0; i < NSP; ++i) {
+    const auto& [name, _] = sortedByPriority[i];
     auto& s = trafficLights_[name];
 
-    if (s.isUnknown()) {
-      s.command = "set_state:ALERT";
-    }
-    else if (s.isAlert()) {
-      s.command = "set_state:green";
-      s.command += ";set_time:21000";  // tempo padrão
-    }
-    else {
-      s.command = "increase_time:5000";
+    if (i == 0) {
+      int green = TVD_BASE + TVD_BONUS;
+      int red = (TVD_BASE + TA) * (NSP - 1);
+
+      s.command = "set_green_time:" + std::to_string(green) +
+                  ";set_red_time:" + std::to_string(red);
+    } else {
+      int red = TVD_BASE + TVD_BONUS + TA + (i - 1) * (TVD_BASE + TA);
+      int green = TVD_BASE;
+      s.command = "set_red_time:" + std::to_string(red) +
+                  ";set_green_time:" + std::to_string(green);
     }
   }
 }
 
-std::vector<std::string> Orchestrator::getHigherPrioritySTL() {
-  std::vector<std::string> candidates;
-  for (const auto& [name, state] : trafficLights_) {
-    if (state.priority >= MIN_PRIORITY || state.isUnknown() || state.isAlert()) {
-      candidates.push_back(name);
+
+void Orchestrator::updatePriorityList(const std::string& intersectionName, const std::optional<std::string>& updatedLight) {
+  auto it = intersections_.find(intersectionName);
+  if (it == intersections_.end()) return;
+
+  auto& list = sortedPriorityCache_[intersectionName];
+
+  // Caso especial: não há cache ou semáforo foi removido
+  if (!updatedLight || list.empty() || std::find(it->second.trafficLightNames.begin(), it->second.trafficLightNames.end(), *updatedLight) == it->second.trafficLightNames.end()) {
+    list.clear();
+    for (const auto& name : it->second.trafficLightNames) {
+      list.emplace_back(name, trafficLights_[name].priority);
     }
+
+    std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) {
+      return a.second > b.second;
+    });
+    return;
   }
-  return candidates;
+
+  // Atualiza posição do semáforo modificado
+  const std::string& name = *updatedLight;
+  int newPriority = trafficLights_[name].priority;
+
+  auto comp = [](const auto& a, const auto& b) { return a.second > b.second; };
+
+  // Remove o atual
+  list.erase(std::remove_if(list.begin(), list.end(),
+                            [&](const auto& p) { return p.first == name; }),
+             list.end());
+
+  // Inserção ordenada com busca binária
+  auto pos = std::lower_bound(list.begin(), list.end(), std::make_pair("", newPriority),
+                              [&](const auto& a, const auto& b) {
+                                return a.second > b.second;
+                              });
+  list.insert(pos, {name, newPriority});
 }
 
-bool Orchestrator::processIntersections(const std::vector<std::string>& candidates) {
-  for (const auto& [interName, inter] : intersections_) {
-    std::vector<std::string> open, closed, unknown, alert;
-    std::string highestPriority;
-    int maxPriority = -1;
 
-    for (const std::string& name : inter.trafficLightNames) {
-      if (std::find(candidates.begin(), candidates.end(), name) != candidates.end()) {
-        const auto& s = trafficLights_[name];
-
-        if (s.state == "green") open.push_back(name);
-        else if (s.isUnknown()) unknown.push_back(name);
-        else if (s.isAlert()) alert.push_back(name);
-        else closed.push_back(name);
-
-        if (s.priority > maxPriority) {
-          maxPriority = s.priority;
-          highestPriority = name;
-        }
-      }
-    }
-
-    if (!unknown.empty()) {
-      for (const std::string& name : inter.trafficLightNames) {
-        auto& s = trafficLights_[name];
-        if (!s.isUnknown()) {
-          s.command = "set_state:ALERT";
-        }
-      }
-      return true;
-    }
-
-    if (alert.size() >= 2) {
-      for (const std::string& name : alert) {
-        auto& s = trafficLights_[name];
-        if (name == highestPriority) {
-          s.command = "set_state:green;set_time:21000";
-        } else {
-          s.command = "set_state:red;set_time:24000"; 
-        }
-      }
-      return true;
-    }
-
-    if (!open.empty() && !closed.empty()) {
-      auto now = std::chrono::steady_clock::now();
-
-      for (const std::string& name : inter.trafficLightNames) {
-        auto& s = trafficLights_[name];
-
-        auto dur = s.endTime - now;
-        uint64_t remainingTime = (s.endTime > now)
-          ? std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
-          : 0;
-
-        if (name == highestPriority) {
-          s.command = "increase_time:10000";
-        } else {
-          s.command = "decrease_time:10000";
-        }
-
-        if (remainingTime == 0) {
-          s.command = "do_nothing";
-        }
-      }
-
-      lastModified = highestPriority;
-      return true;
-    }
-  }
-  return false;
-}
 
 
 bool Orchestrator::processGreenWave() {
@@ -348,20 +364,19 @@ void Orchestrator::produceCommand(const std::string& trafficLightName, const ndn
 
 void Orchestrator::onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) {
   std::cerr << "Nack received: " << interest.getName().toUri() << " Reason: " << nack.getReason() << std::endl;
-  std::string trafficLightName = interest.getName().at(-2).toUri();
+  std::string trafficLightName = interest.getName().toUri();
   auto& tl = trafficLights_[trafficLightName];
   tl.command="set_state:UNKNOWN";
 }
 
 void Orchestrator::onTimeout(const ndn::Interest& interest) {
   std::cerr << "Interest timeout: " << interest.getName().toUri() << std::endl;
-  std::string trafficLightName = interest.getName().at(-2).toUri();
+  std::string trafficLightName = interest.getName().toUri();
   auto& tl = trafficLights_[trafficLightName];
   tl.timeOutCounter++;
   if (tl.timeOutCounter>=2){
     tl.command="set_state:UNKNOWN";
-  }
-  
+  } 
 }
 
 ndn::Interest Orchestrator::createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) {

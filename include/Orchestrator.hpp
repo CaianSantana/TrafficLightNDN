@@ -3,6 +3,7 @@
 
 #define MIN_PRIORITY 20
 
+
 #include "ProConInterface.hpp"
 #include <ndn-cxx/name.hpp>
 #include <ndn-cxx/face.hpp>
@@ -53,15 +54,17 @@ protected:
 private:
   void produceClockData(const ndn::Interest& interest);
   void produceCommand(const std::string& trafficLightName, const ndn::Interest& interest);
-  void reviewPriorities();
-  std::vector<std::string> getHigherPrioritySTL();
-  bool processIntersections(const std::vector<std::string>& candidates);
+  void delegateCommandTo(const std::string& name);
+  int getAveragePrioritySTL();
+  void handleIntersectionLogic(const std::string& intersectionName);
   bool processGreenWave();
+  void updatePriorityList(const std::string& intersectionName, const std::optional<std::string>& updatedLight = std::nullopt);
 
 private:
   std::map<std::string, TrafficLightState> trafficLights_;
   std::map<std::string, Intersection> intersections_;
   std::map<std::string, std::vector<std::string>> waveGroups_;
+  std::map<std::string, std::vector<std::pair<std::string, int>>> sortedPriorityCache_;
   boost::asio::io_context m_ioCtx;
   ndn::Face m_face{m_ioCtx};
   ndn::KeyChain m_keyChain;
