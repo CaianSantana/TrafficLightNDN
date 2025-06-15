@@ -11,17 +11,19 @@
 #include <ndn-cxx/security/signing-helpers.hpp>
 #include <ndn-cxx/security/validator-config.hpp>
 
-
-
-
-
-
 #include <iostream>
 #include <string>
 #include <random>
 #include <chrono> 
 #include <unistd.h>
 #include <typeinfo>
+
+
+
+using namespace std::chrono_literals;
+using namespace ndn;
+using namespace ndn::security;
+
 
 namespace ndn {
 class ProConInterface {
@@ -39,7 +41,7 @@ protected:
   virtual void onNack(const ndn::Interest&, const ndn::lp::Nack&) = 0;
   virtual void onTimeout(const ndn::Interest&) = 0;
 
-  virtual ndn::Interest createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) = 0;
+  virtual ndn::Interest createInterest(const ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) = 0;
   virtual void sendInterest(const ndn::Interest&) = 0;
 
   virtual void onInterest(const ndn::Interest&) = 0;

@@ -3,27 +3,16 @@
 
 #define MIN_PRIORITY 20
 
-
-#include "ProConInterface.hpp"
-#include <ndn-cxx/name.hpp>
-#include <ndn-cxx/face.hpp>
-#include <ndn-cxx/security/key-chain.hpp>
-#include <ndn-cxx/security/signing-helpers.hpp>
-#include <ndn-cxx/security/validator-config.hpp>
-#include <ndn-cxx/util/scheduler.hpp>
-#include <ndn-cxx/util/time.hpp>
-#include <boost/asio/io_context.hpp>
-
-
 #include <unordered_map>
-#include <string>
-#include <chrono>
 #include <mutex>
-#include <iostream>
+#include "ProConInterface.hpp"
+#include <ndn-cxx/util/time.hpp>
+
+
+
 #include "Structs.hpp"
 
-using namespace ndn;
-using namespace ndn::security;
+
 
 class Orchestrator : public ndn::ProConInterface {
 public:
@@ -44,8 +33,7 @@ protected:
   void onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) override;
   void onTimeout(const ndn::Interest& interest) override;
 
-  ndn::Interest createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix,
-                               ndn::time::milliseconds lifetime) override;
+  ndn::Interest createInterest(const ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) override;
   void sendInterest(const ndn::Interest& interest) override;
 
   void onInterest(const ndn::Interest& interest) override;
