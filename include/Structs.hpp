@@ -4,15 +4,19 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#include "Enums.hpp"
 
 struct TrafficLightState {
     std::string name;
     std::string state = "RED";
+    int cycle;
     std::chrono::steady_clock::time_point endTime;
     int priority = 0;
     std::string command;
-    bool intersection = false;
     int timeOutCounter = 0;
+    int columns = 0;
+    int lines = 0;
+    Status intensity = Status::NONE; 
 
     bool isUnknown() const {
         return state == "UNKNOWN";
@@ -30,4 +34,9 @@ struct Intersection {
     bool contains(const std::string& name) const {
         return std::find(trafficLightNames.begin(), trafficLightNames.end(), name) != trafficLightNames.end();
     }
+};
+
+struct Command {
+    std::string type;
+    std::string value;
 };
