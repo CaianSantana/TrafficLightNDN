@@ -28,19 +28,18 @@ add_executable(orchestrator
     src/YamlParser.cpp
 )
 
-#add_executable(trafficLight
-#    mainSTL.cpp
-#    STLNDN.cpp
-#    YamlParser.cpp
-#)
+add_executable(trafficLight
+    main/mainSTL.cpp
+    src/SmartTrafficLight.cpp
+    src/YamlParser.cpp
+)
 
 target_link_libraries(orchestrator
     ${NDN_LIBRARIES}  # linka com o ndn-cxx via pkg-config
     yaml-cpp
 )
 
-#target_link_libraries(trafficLight
-#    ${NDN_LIBRARIES}  # linka com o ndn-cxx via pkg-config
-#    yaml-cpp
-#    nlohmann_json::nlohmann_json
-#)
+target_link_libraries(trafficLight
+    ${NDN_LIBRARIES}  # linka com o ndn-cxx via pkg-config
+    yaml-cpp
+)

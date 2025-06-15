@@ -379,7 +379,7 @@ void Orchestrator::onTimeout(const ndn::Interest& interest) {
   } 
 }
 
-ndn::Interest Orchestrator::createInterest(ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) {
+ndn::Interest Orchestrator::createInterest(const ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) {
   ndn::Interest interest(name);
   interest.setMustBeFresh(mustBeFresh);
   interest.setCanBePrefix(canBePrefix);

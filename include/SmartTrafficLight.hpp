@@ -1,47 +1,83 @@
 #ifndef SMARTTRAFFICLIGHT_HPP
 #define SMARTTRAFFICLIGHT_HPP
 
-#include <iostream>
-#include <string>
+
+#include "Structs.hpp"
+#include "ProConInterface.hpp"
+
 #include <thread>
 #include <vector>
 #include <mutex>
 #include <utility>
 
-namespace traffic {
 
-    enum class Status { NONE = 1, WEAK = 2, MEDIUM = 5, INTENSE = 8 };
-    enum class Color {GREEN = 0, YELLOW = 1, RED = 2, NONE = 3 };
+class SmartTrafficLight : public ndn::ProConInterface {
+public:
+    SmartTrafficLight();
+    void setup(const std::string& prefix) override;
+    void loadConfig(const TrafficLightState& config);
+    void run() override;
 
-    class SmartTrafficLight {
-    public:
-        SmartTrafficLight(int columns, int lines, traffic::Status intensityLevel, traffic::Color start_color = traffic::Color::GREEN);
-        void start();
-        bool reviewRequest(float otherPriority);
+protected:
+  void runProducer(const std::string& suffix) override;
+  void runConsumer() override;
 
-    protected:
-        std::vector<std::pair<std::string, int>> colors_vector;
-        int columns;
-        int lines;
-        int capacity;
-        int vehicles = 0;
-        int full_cicle_vehicles_quantity = 0;
-        int time_left;
-        float priority = 0.0f;
-        traffic::Status intensity;
-        traffic::Color start_color;
-        std::mutex mtx;
-        traffic::Color current_color = traffic::Color::GREEN;
-        void changeTime(bool isgreen);
-        void calculatePriority();
+  void onData(const ndn::Interest&, const ndn::Data& data) override;
+  void onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) override;
+  void onTimeout(const ndn::Interest& interest) override;
 
-    private:
-        
-        int generateNumber(int min, int max);
-        void generateTraffic();
-        bool hasLowerPriorityThan(float otherPriority);
-        
-    };
-}
+  ndn::Interest createInterest(const ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) override;                            
+  void sendInterest(const ndn::Interest& interest) override;
 
-#endif // SMARTTRAFFICLIGHT_HPP
+  void onInterest(const ndn::Interest& interest) override;
+  void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) override;
+
+private:
+    void cycle(size_t index);
+
+    void generateTraffic();
+    int generateNumber(int min, int max);
+
+    float calculatePriority();
+
+    std::vector<Command> parseCommands(const std::string& rawCommand);
+    void applyCommand(const Command& cmd);
+
+    void updateColorVectorTime(Color color, int newTime);
+    int getDefaultColorTime(Color color) const;
+
+private:
+    boost::asio::io_context m_ioCtx;
+    ndn::Face m_face{m_ioCtx};
+    ndn::KeyChain m_keyChain;
+    ndn::ScopedRegisteredPrefixHandle m_certServeHandle;
+    ndn::ValidatorConfig m_validator;
+    ndn::Scheduler m_scheduler{m_ioCtx};
+    std::mutex mutex_; 
+
+    std::string central;
+    std::string prefix_;
+
+    Color start_color = Color::UNKNOWN;
+    Color current_color = Color::UNKNOWN;
+
+    int cycle_time = 0;
+    int columns = 0;
+    int lines = 0;
+    int capacity = 0;
+    Status intensity;
+    int vehicles = 0;
+    int full_cicle_vehicles_quantity = 0;
+
+    int time_left = 0;
+    uint64_t stateChangeTimestamp = 0;
+
+    std::vector<std::pair<std::string, int>> colors_vector;
+    std::vector<std::pair<std::string, int>> default_colors_vector;
+
+    std::mutex mtx;
+
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
+};
+
+#endif // SMART_TRAFFIC_LIGHT_HPP
