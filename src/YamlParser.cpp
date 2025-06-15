@@ -6,20 +6,30 @@ YamlParser::YamlParser(const std::string& filepath) {
 }
 
 void YamlParser::parse(const YAML::Node& config) {
-    constexpr int TA = 3; // Tempo amarelo em segundos
+    constexpr int TA = 3;
 
     for (const auto& node : config["traffic-lights"]) {
         std::string name = node["name"].as<std::string>();
-        int priority = node["priority"].as<int>();
         int cycleTime = node["cycle_time"].as<int>();
         std::string state = node["state"].as<std::string>();
 
+        int columns = 0;
+        int lines = 0;
+        if (node["columns"]) columns = node["columns"].as<int>();
+        if (node["lines"]) lines = node["lines"].as<int>();
+
+        Status intensity = Status::NONE;
+        if (node["intensity"]) {
+            intensity = parseIntensity(node["intensity"].as<std::string>());
+        }
+
         TrafficLightState light;
         light.name = name;
-        light.priority = priority;
         light.state = state;
-        light.command = state;
-        light.intersection = false;
+        light.cycle = cycleTime;
+        light.columns = columns;
+        light.lines = lines;
+        light.intensity = intensity;
 
         int duration;
         if (state == "GREEN") {
@@ -42,17 +52,9 @@ void YamlParser::parse(const YAML::Node& config) {
         cross.name = crossName;
         cross.trafficLightNames = sems;
         intersections[crossName] = cross;
-
-        for (const auto& s : sems) {
-            if (trafficLights.find(s) != trafficLights.end()) {
-                trafficLights[s].intersection = true;
-            } else {
-                std::cerr << "Aviso: semáforo '" << s << "' no cruzamento '"
-                          << crossName << "' não foi definido na seção 'traffic-lights'.\n";
-            }
-        }
     }
 }
+
 
 
 const std::map<std::string, TrafficLightState>& YamlParser::getTrafficLights() const {
@@ -61,4 +63,14 @@ const std::map<std::string, TrafficLightState>& YamlParser::getTrafficLights() c
 
 const std::map<std::string, Intersection>& YamlParser::getIntersections() const {
     return intersections;
+}
+
+std::optional<TrafficLightState> YamlParser::getTrafficLightByIndex(int index) const {
+    if (index < 0 || index >= static_cast<int>(trafficLights.size())) {
+        return std::nullopt;
+    }
+
+    auto it = trafficLights.begin();
+    std::advance(it, index);
+    return it->second;
 }

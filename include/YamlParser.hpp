@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <iostream>
+#include <optional>
 #include "Structs.hpp"
 
 class YamlParser {
@@ -12,6 +13,8 @@ public:
 
     const std::map<std::string, TrafficLightState>& getTrafficLights() const;
     const std::map<std::string, Intersection>& getIntersections() const;
+    std::optional<TrafficLightState> getTrafficLightByIndex(int index) const;
+
 
 private:
     std::map<std::string, TrafficLightState> trafficLights;

@@ -1,26 +1,28 @@
 traffic-lights:
   - name: "/salvador/barbalho/rua1/1"
-    priority: 5
     cycle_time: 90
     state: "GREEN"
+    columns: 3
+    lines: 2
+    intensity: "INTENSE" 
 
   - name: "/salvador/barbalho/rua1/2"
-    priority: 3
     cycle_time: 90
     state: "GREEN"
+    columns: 4
+    lines: 3
+    intensity: "MEDIUM"
 
   - name: "/salvador/barbalho/rua1/3"
-    priority: 1
     cycle_time: 90
     state: "GREEN"
+    columns: 3
+    lines: 3
+    intensity: "WEAK"
 
   - name: "/salvador/barbalho/rua2/1"
-    priority: 1
     cycle_time: 90
     state: "RED"
-
-intersections:
-  - name: "cruzamento_rua1_rua2"
-    traffic-lights:
-      - "/salvador/barbalho/rua1/1"
-      - "/salvador/barbalho/rua2/1"
+    columns: 2
+    lines: 4
+    intensity: "NONE"
