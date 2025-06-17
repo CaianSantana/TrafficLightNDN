@@ -1,10 +1,11 @@
 #ifndef ORCHESTRATOR_HPP
 #define ORCHESTRATOR_HPP
 
-#define MIN_PRIORITY 20
+#define MIN_PRIORITY 10
 
 #include <unordered_map>
 #include <mutex>
+#include <algorithm>
 #include "ProConInterface.hpp"
 #include <ndn-cxx/util/time.hpp>
 
@@ -40,11 +41,12 @@ protected:
   void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) override;
 
 private:
-  void produceClockData(const ndn::Interest& interest);
+  void produceSyncData(const std::string& trafficLightName, const ndn::Interest& interest);
   void produceCommand(const std::string& trafficLightName, const ndn::Interest& interest);
   void delegateCommandTo(const std::string& name);
-  int getAveragePrioritySTL();
+  float getAveragePrioritySTL();
   void handleIntersectionLogic(const std::string& intersectionName);
+  std::string synchronize(const std::string& intersectionName, const std::string& requester);
   bool processGreenWave();
   void updatePriorityList(const std::string& intersectionName, const std::optional<std::string>& updatedLight = std::nullopt);
 

@@ -11,7 +11,7 @@ struct TrafficLightState {
     std::string state = "RED";
     int cycle;
     std::chrono::steady_clock::time_point endTime;
-    int priority = 0;
+    float priority = 0;
     std::string command;
     int timeOutCounter = 0;
     int columns = 0;

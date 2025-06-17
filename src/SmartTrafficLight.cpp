@@ -1,12 +1,19 @@
 #include "../include/SmartTrafficLight.hpp"
 
 
-
+using namespace std::chrono;
 
 SmartTrafficLight::SmartTrafficLight() 
    : m_validator(m_face)
 {
     m_validator.load("../config/trust-schema.conf");
+}
+
+SmartTrafficLight::~SmartTrafficLight() {
+  m_stopFlag = true;
+  if (m_cycleThread.joinable()) {
+    m_cycleThread.join();
+  }
 }
 
 void SmartTrafficLight::setup(const std::string& prefix){
@@ -37,20 +44,27 @@ void SmartTrafficLight::loadConfig(const TrafficLightState& config) {
 void SmartTrafficLight::run() {
     size_t index = static_cast<size_t>(start_color);
     runProducer("");
-    m_scheduler.schedule(ndn::time::milliseconds(0), [this, index] { this->cycle(index); });
+    runConsumer();
+    std::thread([this, index] {
+     this->cycle(index);
+    }).detach();
     m_face.processEvents();
 }
 
+void SmartTrafficLight::startCycle(size_t index) {
+  m_stopFlag = false; 
+  m_cycleThread = std::thread(&SmartTrafficLight::cycle, this, index);
+}
+
 void SmartTrafficLight::cycle(size_t index) {
+  while (!m_stopFlag) {
     if (current_color == Color::ALERT) {
-        std::cout << prefix_ << " - ALERT state active." << std::endl;
-
-        generateTraffic();
-        m_scheduler.schedule(ndn::time::seconds(1), [this, index] {
-            this->cycle(index); 
-        });
-
-        return; 
+      std::cout << prefix_ << " - ALERT state active." << std::endl;
+      generateTraffic();
+      std::lock_guard<std::mutex> lock(mtx);
+      passVehicles();
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+      continue;
     }
 
     const auto& [color_str, seconds] = colors_vector[index];
@@ -59,39 +73,43 @@ void SmartTrafficLight::cycle(size_t index) {
 
     int count = 0;
 
-    for (; time_left > 0; time_left--) {
-        std::cout << prefix_ << " - " << color_str << ": " << time_left << std::endl;
-        generateTraffic();
+    while (time_left > 0 && !m_stopFlag) {
+      std::cout << prefix_ << " - " << color_str << ": " << time_left << std::endl;
+      generateTraffic();
 
-        if (current_color != Color::RED) {
-            if (current_color == Color::GREEN && count == 0) {
-                full_cicle_vehicles_quantity = 0;
-            }
-            if (vehicles > 0 && count >= 2) {
-                std::lock_guard<std::mutex> lock(mtx);
-                int vehicles_to_pass = std::min(vehicles, columns);
-                vehicles_to_pass = generateNumber(0, vehicles_to_pass);
-                vehicles -= vehicles_to_pass;
-                std::cout << "Vehicles passed: " << vehicles_to_pass << std::endl;
-            } else {
-                count++;
-            }
-        } else {
-            count = 0;
+      if (current_color != Color::RED) {
+        if (current_color == Color::GREEN && count == 0) {
+          full_cicle_vehicles_quantity = 0;
         }
+        if (vehicles > 0 && count >= 2) {
+          std::lock_guard<std::mutex> lock(mtx);
+          passVehicles();
+        } else {
+          count++;
+        }
+      } else {
+        count = 0;
+      }
 
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+      time_left--;
+      std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    size_t nextIndex = (index + 1) % colors_vector.size();
-    m_scheduler.schedule(ndn::time::milliseconds(0), [this, nextIndex] { this->cycle(nextIndex); });
+    index = (index + 1) % colors_vector.size();
+  }
+
+  std::cout << prefix_ << " - Cycle thread terminated." << std::endl;
 }
 
+void SmartTrafficLight::passVehicles(){
+    int vehicles_to_pass = std::min(vehicles, columns);
+    vehicles_to_pass = generateNumber(0, vehicles_to_pass);
+    vehicles -= vehicles_to_pass;
+}
 
 float SmartTrafficLight::calculatePriority() {
     return full_cicle_vehicles_quantity * 0.5f
-           + (static_cast<float>(vehicles) / capacity) * 10
-           + colors_vector[2].second;
+           + (static_cast<float>(vehicles) / capacity) * 10;
 }
 
 int SmartTrafficLight::generateNumber(int min, int max) {
@@ -104,19 +122,24 @@ void SmartTrafficLight::generateTraffic() {
     if (generateNumber(1, 10) < static_cast<int>(intensity) && vehicles < capacity) {
         vehicles++;
         full_cicle_vehicles_quantity++;
-        std::cout << "A new vehicle arrived!" << std::endl;
-        std::cout << "Vehicles: " << vehicles << std::endl;
-    } else if (vehicles == capacity) {
-        std::cout << "Max capacity achieved!" << std::endl;
     }
+    std::cout << prefix_ << " - " << "Vehicles: " << vehicles << std::endl;
+
 }
 
 
 void SmartTrafficLight::runConsumer() {
+    if (isBootStrap){
+        auto interestSync = createInterest(central + "/sync"+prefix_, true, false, 100_ms);
+        sendInterest(interestSync);
+        isBootStrap=false;
+    }
+    m_scheduler.schedule(ndn::time::seconds(60), [this] {
+        auto interestSync = createInterest(central + "/sync"+prefix_, true, false, 100_ms);
+        sendInterest(interestSync);
+    });
     m_scheduler.schedule(ndn::time::seconds(5), [this] {
-        auto interestClock = createInterest(central + "/clock", true, false, 500_ms);
-        auto interestCommand = createInterest(central + "/command", true, false, 2000_ms);
-        sendInterest(interestClock);
+        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 2000_ms);
         sendInterest(interestCommand);
         runConsumer();
     });
@@ -124,6 +147,7 @@ void SmartTrafficLight::runConsumer() {
 
 void SmartTrafficLight::runProducer(const std::string& suffix){
     ndn::Name nameSuffix = ndn::Name(prefix_).append(suffix);
+    std::cout << "name suffix " << nameSuffix << std::endl;
   m_face.setInterestFilter(nameSuffix,
       [this](const ndn::InterestFilter& filter, const ndn::Interest& interest) {
         this->onInterest(interest);
@@ -141,13 +165,19 @@ void SmartTrafficLight::runProducer(const std::string& suffix){
 }
 
 void SmartTrafficLight::onInterest(const ndn::Interest& interest) {
-    std::cout << prefix_ << " - Received Interest: " << interest.getName().toUri() << std::endl;
+    std::cout << "[Producer] Received Interest: " << interest.getName().toUri() << std::endl;
 
-    
-    std::string priority = std::to_string(calculatePriority());
+    std::string currentStateStr = ToString(current_color); 
+    int remainingMs = time_left * 1000; 
+    float priority = calculatePriority();
+
+    std::ostringstream oss;
+    oss << currentStateStr << "|" << remainingMs << "|" << priority;
+
+    std::string content = oss.str();
 
     auto data = std::make_shared<ndn::Data>(interest.getName());
-    data->setContent(std::string_view(priority));  
+    data->setContent(std::string_view(content));
     data->setFreshnessPeriod(ndn::time::seconds(1));
 
     m_keyChain.sign(*data);
@@ -165,68 +195,44 @@ ndn::Interest SmartTrafficLight::createInterest(const ndn::Name& name, bool must
 void SmartTrafficLight::sendInterest(const ndn::Interest& interest) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    interestTimestamps_[interest.getName().toUri()] = std::chrono::steady_clock::now();
+    if (interest.getName().toUri() == central + "/sync"){
+        lastInterestTimestamp_= std::chrono::steady_clock::now();
+    }
   }
   m_face.expressInterest(interest,
                         std::bind(&SmartTrafficLight::onData, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&SmartTrafficLight::onNack, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&SmartTrafficLight::onTimeout, this, std::placeholders::_1));
+  std::cout << "[Consumer] Sending Interest to: " << interest.getName().toUri() << std::endl;
 }
 
 
 void SmartTrafficLight::onData(const ndn::Interest& interest, const ndn::Data& data) {
-    using namespace std::chrono;
+    std::lock_guard<std::mutex> lock(mutex_);
 
-    // Proteja o acesso a interestTimestamps_ se estiver acessando em múltiplas threads
-    // std::lock_guard<std::mutex> lock(mutex_); // Descomente se tiver mutex
+    auto interestUri = data.getName().toUri();
+    auto content = std::string(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
 
-    std::string content(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
-    std::string interestUri = interest.getName().toUri();
-
-    // Procura timestamp do Interest para calcular RTT
-    auto it = interestTimestamps_.find(interestUri);
-    if (it == interestTimestamps_.end()) {
-        std::cerr << prefix_ << " - Interest timestamp not found: " << interestUri << std::endl;
-        return;
-    }
-
-    steady_clock::time_point now = steady_clock::now();
-    steady_clock::duration rtt = now - it->second;
-    interestTimestamps_.erase(it);  // Limpa o timestamp após calcular RTT
-
-    if (interestUri.find("/clock") != std::string::npos) {
-        uint64_t centralTime = 0;
-        try {
-            centralTime = std::stoull(content);
-        } catch (const std::exception& e) {
-            std::cerr << prefix_ << " - Failed to parse central time: " << e.what() << std::endl;
-            return;
-        }
-
-        uint64_t correctedCentralTime = centralTime + duration_cast<milliseconds>(rtt).count() / 2;
-
-        if (stateChangeTimestamp > 0) {
-            uint64_t expectedEnd = correctedCentralTime + time_left * 1000;
-            int64_t delta = static_cast<int64_t>(expectedEnd) - static_cast<int64_t>(stateChangeTimestamp);
-            if (std::abs(delta) > 1000) {
-                time_left += delta / 1000;
-                std::cout << prefix_ << " - Clock adjusted by " << delta / 1000 << "s\n";
-            }
-        } else {
-            stateChangeTimestamp = correctedCentralTime + time_left * 1000;
-        }
-    } else if (interestUri.find("/command") != std::string::npos) {
-        if (content == "do_nothing")
-            return;
-
-        std::vector<Command> commands = parseCommands(content);
-        for (const auto& cmd : commands) {
-            applyCommand(cmd);
-        }
+    std::vector<Command> commands = parseContent(content);
+    
+    for (const auto& cmd : commands) {
+        applyCommand(cmd);
     }
 }
 
-std::vector<Command> SmartTrafficLight::parseCommands(const std::string& rawCommand) {
+std::chrono::steady_clock::duration SmartTrafficLight::calculateRTT() {
+    if (lastInterestTimestamp_ == std::chrono::steady_clock::time_point{}) {
+        return std::chrono::milliseconds(0);
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto diff = now - lastInterestTimestamp_;
+    if (diff.count() < 0) {
+        return std::chrono::milliseconds(0);
+    }
+    return diff / 2;
+}
+
+std::vector<Command> SmartTrafficLight::parseContent(const std::string& rawCommand) {
     std::vector<Command> commands;
     std::istringstream ss(rawCommand);
     std::string commandStr;
@@ -251,26 +257,54 @@ void SmartTrafficLight::applyCommand(const Command& cmd) {
         else if (cmd.value == "YELLOW") current_color = Color::YELLOW;
         else if (cmd.value == "RED") current_color = Color::RED;
         else current_color = Color::ALERT;
-    }
-    else if (cmd.type == "set_time") {
+    }else if (cmd.type == "set_time") {
         int newTime;
         if (cmd.value == "DEFAULT") {
             newTime = getDefaultColorTime(current_color);
+            std::cout << "setando tempo padrão: " << newTime << std::endl;
         } else {
             newTime = std::stoi(cmd.value);
+            std::cout << "setando tempo personalizado: " << newTime << std::endl;
         }
-        time_left = newTime;
+        if (current_color == Color::ALERT){
+            time_left = newTime;
+        }
         updateColorVectorTime(current_color, newTime);
+    }else if (cmd.type == "set_GREEN_time"){
+        int newTime = std::stoi(cmd.value)/1000;
+        updateColorVectorTime(Color::GREEN, newTime);
+    }else if (cmd.type == "set_RED_time"){
+        int newTime = std::stoi(cmd.value)/1000;
+        updateColorVectorTime(Color::RED, newTime);
+    }else if (cmd.type == "set_current_time"){
+        int newTime = std::stoi(cmd.value); 
+        int rtt = duration_cast<milliseconds>(calculateRTT()).count();
+        std::cout << "[DEBUG] Original newTime: " << newTime << " ms" << std::endl;
+        std::cout << "[INFO] RTT estimado: " << rtt << " ms" << std::endl;
+
+        newTime =newTime - rtt;
+
+        time_left = newTime / 1000; 
+
+        std::cout << "Mudando o tempo atual em: " << newTime / 1000 
+                << "s | Novo tempo: " << time_left << "s" << std::endl;
+
+        auto now = std::chrono::steady_clock::now();
+        std::cout << "Now: " << duration_cast<milliseconds>(now.time_since_epoch()).count()
+          << " lastInterestTimestamp_: " << duration_cast<milliseconds>(lastInterestTimestamp_.time_since_epoch()).count() << std::endl;
+
     }
     else if (cmd.type == "increase_time") {
         int increment = std::stoi(cmd.value);
-        time_left += increment;
+        time_left += increment/1000;
         updateColorVectorTime(current_color, time_left);
+        std::cout << "Aumentando o tempo em: " << increment << " Novo tempo: " << time_left <<std::endl;
     }
     else if (cmd.type == "decrease_time") {
         int decrement = std::stoi(cmd.value);
-        time_left = std::max(1, time_left - decrement);
+        time_left = std::max(1, time_left - decrement/1000);
         updateColorVectorTime(current_color, time_left);
+        std::cout << "Diminuindo o tempo em: " << decrement << " Novo tempo: " << time_left <<std::endl;
     }
 }
 

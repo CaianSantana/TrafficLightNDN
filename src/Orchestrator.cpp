@@ -28,6 +28,16 @@ void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& 
       std::cout << " - " << name << std::endl;
     }
 
+    std::cout << "[DEBUG] Cruzamentos carregados:" << std::endl;
+    for (const auto& [name, intersection] : intersections_) {
+        std::cout << " - " << name << ": ";
+        for (const auto& light : intersection.trafficLightNames) {
+            std::cout << light << " ";
+        }
+        std::cout << std::endl;
+    }
+
+
     //waveGroups_.clear();
 
     //for (const auto& [name, state] : trafficLights_) {
@@ -57,7 +67,7 @@ void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& 
 void Orchestrator::run() {
     m_scheduler.schedule(ndn::time::seconds(1), [this]{ runConsumer(); });
     runProducer("command");
-    runProducer("clock");
+    runProducer("sync");
     m_face.processEvents();
 }
 
@@ -85,7 +95,7 @@ void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) 
 
   std::string content(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
   std::string nameStr = interest.getName().toUri();
-  std::string trafficLightName = interest.getName().at(-2).toUri();
+  std::string trafficLightName = interest.getName().toUri();
 
   auto it = interestTimestamps_.find(nameStr);
   if (it == interestTimestamps_.end()) {
@@ -122,11 +132,7 @@ void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) 
   auto& tl = trafficLights_[trafficLightName];
   tl.state = state;
   tl.endTime = now + milliseconds(correctedRemainingMs);
-
-  // Prioridade é opcional
-  if (tokens.size() >= 3) {
-    tl.priority = std::stoi(tokens[2]);
-  }
+  tl.priority = std::stof(tokens[2]);
   tl.timeOutCounter=0;
 
   delegateCommandTo(trafficLightName);
@@ -138,15 +144,6 @@ void Orchestrator::delegateCommandTo(const std::string& name) {
 
   auto& s = it->second;
 
-  if (s.priority < MIN_PRIORITY && !s.isUnknown() && !s.isAlert()) {
-    s.command = "set_time:DEFAULT";
-    return;
-  }
-  if (s.priority < this->getAveragePrioritySTL()) {
-    return; 
-  }
-
- 
   for (const auto& [interName, inter] : intersections_) {
     if (inter.contains(name)) {
       handleIntersectionLogic(interName);
@@ -154,23 +151,41 @@ void Orchestrator::delegateCommandTo(const std::string& name) {
     }
   }
 
-  if (s.state == "green") {
-    s.command = "increase_time:5000";
-  } else if (s.state == "red") {
-    s.command = "decrease_time:3000"; 
-  } else if (s.isAlert()) {
-    s.command = "set_state:green;set_time:21000";
+  if (s.priority < MIN_PRIORITY && !s.isUnknown() && !s.isAlert()) {
+    s.command = "set_time:DEFAULT";
+    std::cout << "default" << std::endl;
+    return;
+  }
+
+  if (s.isAlert()) {
+    s.command = "set_state:GREEN;set_time:DEFAULT";
+    std::cout << "saindo do alerta" << std::endl;
   } else if (s.isUnknown()) {
     s.command = "set_state:ALERT";
+    std::cout << "colocando em alerta" << std::endl;
+  } 
+
+  if (s.priority < this->getAveragePrioritySTL()) {
+    std::cout << "Prioridade: " << s.priority << " Média: " << this->getAveragePrioritySTL() << std::endl;
+    return; 
+  }
+
+  if (s.state == "GREEN") {
+    s.command = "increase_time:5000";
+    std::cout << "aumento verde em 5s" << std::endl;
+  } else if (s.state == "RED") {
+    s.command = "decrease_time:3000"; 
+    std::cout << "aumento vermelho em 3s" << std::endl;
   } else {
     s.command = "do_nothing";
+    std::cout << "nada" << std::endl;
   }
 }
 
 
-int Orchestrator::getAveragePrioritySTL() {
+float Orchestrator::getAveragePrioritySTL() {
   std::vector<std::string> candidates;
-  int averageSum;
+  float averageSum = 0;
   for (const auto& [name, state] : trafficLights_) {
     candidates.push_back(name);
     averageSum+=state.priority;
@@ -199,13 +214,13 @@ void Orchestrator::handleIntersectionLogic(const std::string& intersectionName) 
       int green = TVD_BASE + TVD_BONUS;
       int red = (TVD_BASE + TA) * (NSP - 1);
 
-      s.command = "set_green_time:" + std::to_string(green) +
-                  ";set_red_time:" + std::to_string(red);
+      s.command = "set_GREEN_time:" + std::to_string(green) +
+                  ";set_RED_time:" + std::to_string(red);
     } else {
       int red = TVD_BASE + TVD_BONUS + TA + (i - 1) * (TVD_BASE + TA);
       int green = TVD_BASE;
-      s.command = "set_red_time:" + std::to_string(red) +
-                  ";set_green_time:" + std::to_string(green);
+      s.command = "set_RED_time:" + std::to_string(red) +
+                  ";set_GREEN_time:" + std::to_string(green);
     }
   }
 }
@@ -230,23 +245,105 @@ void Orchestrator::updatePriorityList(const std::string& intersectionName, const
     return;
   }
 
-  // Atualiza posição do semáforo modificado
   const std::string& name = *updatedLight;
   int newPriority = trafficLights_[name].priority;
 
   auto comp = [](const auto& a, const auto& b) { return a.second > b.second; };
 
-  // Remove o atual
   list.erase(std::remove_if(list.begin(), list.end(),
                             [&](const auto& p) { return p.first == name; }),
              list.end());
 
-  // Inserção ordenada com busca binária
   auto pos = std::lower_bound(list.begin(), list.end(), std::make_pair("", newPriority),
                               [&](const auto& a, const auto& b) {
                                 return a.second > b.second;
                               });
   list.insert(pos, {name, newPriority});
+}
+
+std::string Orchestrator::synchronize(const std::string& intersectionName, const std::string& requester) {
+  auto it = intersections_.find(intersectionName);
+  if (it == intersections_.end()) return "";
+
+  auto& requesterTL = trafficLights_[requester];
+  const auto& members = it->second.trafficLightNames;
+
+  std::string highestPriority;
+  std::vector<std::string> active;
+  int highestValue = -1;
+
+  // Find highest priority among green/yellow lights and collect active ones
+  for (const auto& name : members) {
+    const auto& light = trafficLights_[name];
+    if (light.state == "GREEN" || light.state == "YELLOW") {
+      if (light.priority > highestValue) {
+        highestPriority = name;
+        highestValue = light.priority;
+      }
+      active.push_back(name);
+    }
+  }
+
+  if (highestPriority.empty()) {
+    return "";
+  }
+
+  // If requester is the highest priority, no sync action needed
+  if (requester == highestPriority) {
+    return "";
+  }
+
+  auto now = std::chrono::steady_clock::now();
+
+  // If more than one active light and requester is green or yellow, downgrade to red to resolve conflict
+  if (active.size() > 1 && (requesterTL.state == "GREEN" || requesterTL.state == "YELLOW")) {
+    auto remainingGreen = std::chrono::duration_cast<std::chrono::milliseconds>(
+      trafficLights_[highestPriority].endTime - now
+    ).count();
+
+    remainingGreen = std::max(static_cast<int>(remainingGreen), 0);
+    requesterTL.endTime = now + std::chrono::milliseconds(remainingGreen + 3000); // +3s yellow
+
+    std::cout << "[SYNC-CONFLICT] " << requester << " downgraded to RED for "
+              << remainingGreen + 3000 << "ms to resolve priority conflict.\n";
+
+    return "set_state:RED;set_current_time:" + std::to_string(remainingGreen + 3000);
+  }
+
+  // Handle requester in RED state with tolerance epsilon to avoid jitter
+  if (requesterTL.state == "RED") {
+    const int epsilon = 1000; // tolerance in milliseconds
+
+    auto timeUntilOpen = std::chrono::duration_cast<std::chrono::milliseconds>(
+        requesterTL.endTime - now).count();
+
+    auto dominantEnd = std::chrono::duration_cast<std::chrono::milliseconds>(
+        trafficLights_[highestPriority].endTime - now).count();
+    dominantEnd += 3000;  // add yellow duration
+
+    if (std::abs(timeUntilOpen - dominantEnd) <= epsilon) {
+      std::cout << "[SYNC-PREEMPTIVE] " << requester
+                << " already synchronized within " << epsilon << "ms.\n";
+      return "";
+    }
+
+    if (timeUntilOpen < dominantEnd) {
+      auto delay = dominantEnd - timeUntilOpen;
+      requesterTL.endTime += std::chrono::milliseconds(delay);
+      std::cout << "[SYNC-PREEMPTIVE] " << requester
+                << " (RED) delayed by " << delay
+                << "ms to avoid overlap with " << highestPriority << "\n";
+      return "set_current_time:" + std::to_string(dominantEnd);
+    } else if (timeUntilOpen > dominantEnd) {
+      auto advance = timeUntilOpen - dominantEnd;
+      requesterTL.endTime -= std::chrono::milliseconds(dominantEnd);
+      std::cout << "[SYNC-PREEMPTIVE] " << requester
+                << " (RED) advanced by " << advance
+                << "ms to avoid overlap with " << highestPriority << "\n";
+      return "set_current_time:" + std::to_string(dominantEnd);
+    }
+  }
+  return "";
 }
 
 
@@ -317,30 +414,68 @@ bool Orchestrator::processGreenWave() {
 void Orchestrator::onInterest(const ndn::Interest& interest) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if (interest.getName().size() >= 1 
-      && interest.getName().at(-1).toUri() == "clock") {
-    return produceClockData(interest);
-  } else if (interest.getName().size() >= 2 
-             && interest.getName().get(-2).toUri() == "command") {
-    std::string trafficLightName = interest.getName().at(-1).toUri();
+  const auto& name = interest.getName();
+  std::cout << name.toUri() << std::endl;
 
+  bool isSync = false;
+  bool isCommand = false;
+  std::string trafficLightName;
+
+  for (size_t i = 0; i < name.size(); ++i) {
+    const auto& component = name.get(i).toUri();
+
+    if (component == "sync" && i + 1 < name.size()) {
+      isSync = true;
+      std::ostringstream oss;
+      for (size_t j = i + 1; j < name.size(); ++j) {
+        oss << "/" << name.get(j).toUri();
+      }
+      trafficLightName = oss.str();
+      break;
+    }
+
+    if (component == "command" && i + 1 < name.size()) {
+      isCommand = true;
+      std::ostringstream oss;
+      for (size_t j = i + 1; j < name.size(); ++j) {
+        oss << "/" << name.get(j).toUri();
+      }
+      trafficLightName = oss.str();
+      break;
+    }
+  }
+
+  if (isSync) {
+    if (!trafficLights_.count(trafficLightName)) {
+      std::cerr << "Unknown traffic light for sync: " << trafficLightName << std::endl;
+      return;
+    }
+    return produceSyncData(trafficLightName, interest);
+  } else if (isCommand) {
     if (!trafficLights_.count(trafficLightName)) {
       std::cerr << "Unknown traffic light for command: " << trafficLightName << std::endl;
       return;
     }
     return produceCommand(trafficLightName, interest);
   } else {
-    std::cerr << "Invalid suffix.\n";
+    std::cerr << "Invalid suffix." << std::endl;
     return;
   }
 }
 
-void Orchestrator::produceClockData(const ndn::Interest& interest) {
-  auto now = std::chrono::system_clock::now();
-  auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
-  std::string timeStr = std::to_string(nowMs);
-  clockTimestampMs_ = nowMs;
+void Orchestrator::produceSyncData(const std::string& trafficLightName, const ndn::Interest& interest) {
+  std::string timeStr = "";
+
+  for (const auto& [interName, inter] : intersections_) {
+    if (inter.contains(trafficLightName)) {
+      std::string syncCommand = synchronize(interName, trafficLightName);
+      if (!syncCommand.empty()) {
+        timeStr = syncCommand;
+      }
+      break;
+    }
+  }
 
   auto data = std::make_shared<ndn::Data>(interest.getName());
   data->setContent(std::string_view(timeStr));  
@@ -409,7 +544,6 @@ void Orchestrator::runConsumer() {
       sendInterest(interest);
       std::cout << "[Consumer] Asking Data from " << name << std::endl;
     }
-    // Reagendar
     runConsumer();
   });
 }

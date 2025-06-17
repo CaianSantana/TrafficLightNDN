@@ -6,14 +6,18 @@
 #include "ProConInterface.hpp"
 
 #include <thread>
+#include <atomic>
 #include <vector>
 #include <mutex>
 #include <utility>
+#include <algorithm>
 
+using namespace std::chrono;
 
 class SmartTrafficLight : public ndn::ProConInterface {
 public:
     SmartTrafficLight();
+    ~SmartTrafficLight();
     void setup(const std::string& prefix) override;
     void loadConfig(const TrafficLightState& config);
     void run() override;
@@ -33,20 +37,28 @@ protected:
   void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) override;
 
 private:
+    void startCycle(size_t index);
     void cycle(size_t index);
 
     void generateTraffic();
+    void passVehicles();
     int generateNumber(int min, int max);
 
     float calculatePriority();
 
-    std::vector<Command> parseCommands(const std::string& rawCommand);
+    std::vector<Command> parseContent(const std::string& rawCommand);
     void applyCommand(const Command& cmd);
 
     void updateColorVectorTime(Color color, int newTime);
     int getDefaultColorTime(Color color) const;
 
+    void adjustTime(uint64_t correctedCentralTime);
+    uint64_t correctCentralTime(uint64_t centralTime);
+    std::chrono::steady_clock::duration calculateRTT();
+
 private:
+    std::thread m_cycleThread;
+    std::atomic_bool m_stopFlag{false};
     boost::asio::io_context m_ioCtx;
     ndn::Face m_face{m_ioCtx};
     ndn::KeyChain m_keyChain;
@@ -68,6 +80,7 @@ private:
     Status intensity;
     int vehicles = 0;
     int full_cicle_vehicles_quantity = 0;
+    bool isBootStrap = true;
 
     int time_left = 0;
     uint64_t stateChangeTimestamp = 0;
@@ -77,7 +90,7 @@ private:
 
     std::mutex mtx;
 
-    std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
+    std::chrono::steady_clock::time_point lastInterestTimestamp_ = steady_clock::now();
 };
 
 #endif // SMART_TRAFFIC_LIGHT_HPP

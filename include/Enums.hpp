@@ -17,8 +17,17 @@ inline Color parseColor(const std::string& str) {
     if (str == "GREEN") return Color::GREEN;
     if (str == "YELLOW") return Color::YELLOW;
     if (str == "RED") return Color::RED;
-    return Color::ALERT;
-    
+    return Color::ALERT;  
+}
+
+inline std::string ToString(Color color) {
+    switch (color) {
+        case Color::GREEN: return "GREEN";
+        case Color::YELLOW: return "YELLOW";
+        case Color::RED: return "RED";
+        case Color::ALERT: return "ALERT";
+        default: return "UNKNOWN";
+    }
 }
 
 inline Status parseIntensity(const std::string& str) {

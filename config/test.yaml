@@ -4,7 +4,7 @@ traffic-lights:
     state: "GREEN"
     columns: 3
     lines: 2
-    intensity: "INTENSE" 
+    intensity: "HIGH" 
 
   - name: "/salvador/barbalho/rua1/2"
     cycle_time: 90
@@ -18,7 +18,7 @@ traffic-lights:
     state: "GREEN"
     columns: 3
     lines: 3
-    intensity: "WEAK"
+    intensity: "LOW"
 
   - name: "/salvador/barbalho/rua2/1"
     cycle_time: 90
@@ -26,3 +26,7 @@ traffic-lights:
     columns: 2
     lines: 4
     intensity: "NONE"
+
+intersections:
+  - name: "rua1xrua2"
+    traffic-lights: ["/salvador/barbalho/rua1/1", "/salvador/barbalho/rua2/1"]
