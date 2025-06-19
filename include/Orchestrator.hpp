@@ -1,7 +1,7 @@
 #ifndef ORCHESTRATOR_HPP
 #define ORCHESTRATOR_HPP
 
-#define MIN_PRIORITY 10
+#define MIN_PRIORITY 20
 #define TVD_BASE 15000
 #define TVD_BONUS 5000
 #define TA 3000

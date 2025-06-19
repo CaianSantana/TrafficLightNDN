@@ -286,12 +286,14 @@ std::string Orchestrator::synchronize(const std::string& intersectionName, const
   const int RTT = getAverageRTT();
 
   // Verifica conflitos (mais de um semáforo ativo)
-  int active = 0;
+  int active, inactive = 0;
   for (const auto& [name, _] : sorted) {
     const auto& tl = trafficLights_[name];
     if (tl.state == "GREEN" || tl.state == "YELLOW")
       active++;
-  }
+    else
+      inactive++;
+  } 
 
 
   if (active > 1 && requester != highestPriority && 
@@ -304,6 +306,10 @@ std::string Orchestrator::synchronize(const std::string& intersectionName, const
 
     requesterTL.endTime = now + std::chrono::milliseconds(remaining);
     return ";set_state:RED;set_current_time:" + std::to_string(remaining);
+  }
+
+  if (inactive == sorted.size() && requester == highestPriority){
+    return ";set_state:GREEN";
   }
 
   auto itReq = std::find_if(sorted.begin(), sorted.end(),

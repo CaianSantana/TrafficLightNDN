@@ -120,10 +120,10 @@ void SmartTrafficLight::passVehicles(){
 
 float SmartTrafficLight::calculatePriority() {
     float basePriority = full_cicle_vehicles_quantity * 0.5f
-                         + (static_cast<float>(vehicles) / capacity) * 10;
+                         + (static_cast<float>(vehicles) / capacity) * 5;
 
     if (current_color == Color::GREEN) {
-        basePriority += 100.0f; // Bônus por estar verde
+        basePriority += 20.0f; // Bônus por estar verde
     }
 
     return basePriority;
@@ -140,13 +140,12 @@ void SmartTrafficLight::generateTraffic() {
         vehicles++;
         full_cicle_vehicles_quantity++;
     }
-    std::cout << prefix_ << " - " << "Vehicles: " << vehicles << std::endl;
-
+    //std::cout << prefix_ << " - " << "Vehicles: " << vehicles << std::endl;
 }
 
 
 void SmartTrafficLight::runConsumer() {
-    m_scheduler.schedule(ndn::time::seconds(5), [this] {
+    m_scheduler.schedule(ndn::time::seconds(1), [this] {
         auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 100_ms);
         sendInterest(interestCommand);
         runConsumer();
@@ -173,7 +172,7 @@ void SmartTrafficLight::runProducer(const std::string& suffix){
 }
 
 void SmartTrafficLight::onInterest(const ndn::Interest& interest) {
-    std::cout << "[Producer] Received Interest: " << interest.getName().toUri() << std::endl;
+    //std::cout << "[Producer] Received Interest: " << interest.getName().toUri() << std::endl;
 
     std::string currentStateStr = ToString(current_color); 
     int remainingMs = time_left * 1000; 
@@ -190,7 +189,7 @@ void SmartTrafficLight::onInterest(const ndn::Interest& interest) {
 
     m_keyChain.sign(*data);
     m_face.put(*data);
-    std::cout << "[Producer] Data sent: " << interest.getName().toUri() << std::endl;
+    //std::cout << "[Producer] Data sent: " << interest.getName().toUri() << std::endl;
 
 }
 
@@ -211,7 +210,7 @@ void SmartTrafficLight::sendInterest(const ndn::Interest& interest) {
                         std::bind(&SmartTrafficLight::onData, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&SmartTrafficLight::onNack, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&SmartTrafficLight::onTimeout, this, std::placeholders::_1));
-  std::cout << "[Consumer] Sending Interest to: " << interest.getName().toUri() << std::endl;
+  //std::cout << "[Consumer] Sending Interest to: " << interest.getName().toUri() << std::endl;
 }
 
 
@@ -223,7 +222,7 @@ void SmartTrafficLight::onData(const ndn::Interest& interest, const ndn::Data& d
 
     std::vector<Command> commands = parseContent(content);
     for (const auto& cmd : commands) {
-        std::cout << "Comando: " << cmd.type << " Valor: " << cmd.value << std::endl;
+        //std::cout << "Comando: " << cmd.type << " Valor: " << cmd.value << std::endl;
         if(!applyCommand(cmd))
             break;
     }
@@ -298,15 +297,13 @@ bool SmartTrafficLight::applyCommand(const Command& cmd) {
         std::cout << "Tempo configurado para: " << colors_vector[index].second << " Novo tempo: " << time_left <<std::endl;
     }else if (cmd.type == "increase_time") {
         int increment = std::stoi(cmd.value);
-        time_left += increment/1000;
-        updateColorVectorTime(current_color, time_left);
-        std::cout << "Aumentando o tempo em: " << increment << " Novo tempo: " << time_left <<std::endl;
+        updateColorVectorTime(current_color, colors_vector[index].second+increment/1000);
+        std::cout << "Aumentando o tempo em: " << increment << " Novo tempo: " << colors_vector[index].second <<std::endl;
     }
     else if (cmd.type == "decrease_time") {
         int decrement = std::stoi(cmd.value);
-        time_left = std::max(1, time_left - decrement/1000);
-        updateColorVectorTime(current_color, time_left);
-        std::cout << "Diminuindo o tempo em: " << decrement << " Novo tempo: " << time_left <<std::endl;
+        updateColorVectorTime(current_color, colors_vector[index].second-std::max(1, decrement/1000));
+        std::cout << "Diminuindo o tempo em: " << decrement << " Novo tempo: " << colors_vector[index].second <<std::endl;
     }
     return true;
 }

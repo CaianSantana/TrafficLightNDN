@@ -34,6 +34,13 @@ traffic-lights:
     lines: 4
     intensity: "MEDIUM"
 
+  - name: "/salvador/barbalho/rua4/1"
+    cycle_time: 90
+    state: "GREEN"
+    columns: 2
+    lines: 4
+    intensity: "MEDIUM"
+
 intersections:
   - name: "rua1xrua2xrua3"
-    traffic-lights: ["/salvador/barbalho/rua1/1", "/salvador/barbalho/rua2/1", "/salvador/barbalho/rua3/1"]
+    traffic-lights: ["/salvador/barbalho/rua1/1", "/salvador/barbalho/rua2/1", "/salvador/barbalho/rua3/1", "/salvador/barbalho/rua4/1"]
