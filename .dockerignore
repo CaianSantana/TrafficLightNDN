@@ -1,0 +1,6 @@
+build/
+.git/
+.vscode/
+Dockerfile
+*.md
+install-NFD.sh

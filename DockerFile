@@ -1,0 +1,63 @@
+# --- ESTÁGIO 1: BUILDER ---
+FROM alpine:3.20 AS builder
+
+RUN apk add --no-cache \
+    git \
+    build-base \
+    boost-dev \
+    openssl-dev \
+    sqlite-dev \
+    libpcap-dev \
+    elogind-dev \
+    pkgconf \
+    python3
+
+WORKDIR /usr/src/app
+
+RUN git clone https://github.com/named-data/ndn-cxx.git && \
+    cd ndn-cxx && \
+    ./waf configure && \
+    ./waf && \
+    ./waf install && \
+    ldconfig
+
+RUN git clone --recursive https://github.com/named-data/NFD.git && \
+    cd NFD && \
+    ./waf configure && \
+    ./waf && \
+    ./waf install && \
+    ldconfig
+
+WORKDIR /usr/src/app
+COPY . .
+
+RUN rm -rf build && mkdir build
+
+WORKDIR /usr/src/app/build
+
+RUN cmake ..
+RUN make
+
+
+FROM alpine:3.20
+
+RUN apk add --no-cache \
+    libpcap \
+    boost-system \
+    openssl \
+    sqlite-libs
+
+WORKDIR /app
+
+# Copia os binários e libs do NFD/NDN-CXX
+COPY --from=builder /usr/local/bin/nfd-start /usr/local/bin/
+COPY --from=builder /usr/local/bin/nfdc /usr/local/bin/
+COPY --from=builder /usr/local/lib/libndn-cxx.so* /usr/local/lib/
+COPY --from=builder /usr/local/lib/libnfd.so* /usr/local/lib/
+COPY --from=builder /usr/src/app/build/trafficLight .
+COPY --from=builder /usr/src/app/build/orchestrator .
+
+RUN ldconfig
+
+# CMD ["./trafficLight"]
+# CMD ["./orchestrator"]
