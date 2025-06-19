@@ -2,6 +2,9 @@
 #define ORCHESTRATOR_HPP
 
 #define MIN_PRIORITY 10
+#define TVD_BASE 15000
+#define TVD_BONUS 5000
+#define TA 3000
 
 #include <unordered_map>
 #include <mutex>
@@ -41,20 +44,25 @@ protected:
   void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) override;
 
 private:
-  void produceSyncData(const std::string& trafficLightName, const ndn::Interest& interest);
   void produceCommand(const std::string& trafficLightName, const ndn::Interest& interest);
-  void delegateCommandTo(const std::string& name);
+  std::string delegateCommandTo(const std::string& name);
   float getAveragePrioritySTL();
-  void handleIntersectionLogic(const std::string& intersectionName);
+  std::string handleIntersectionLogic(const std::string& intersectionName, const std::string& trafficLightName);
   std::string synchronize(const std::string& intersectionName, const std::string& requester);
   bool processGreenWave();
-  void updatePriorityList(const std::string& intersectionName, const std::optional<std::string>& updatedLight = std::nullopt);
+  void updatePriorityList(const std::string& intersectionName);
+  int recordRTT(const std::string& interestName);
+  int getAverageRTT() const;
+
 
 private:
   std::map<std::string, TrafficLightState> trafficLights_;
   std::map<std::string, Intersection> intersections_;
   std::map<std::string, std::vector<std::string>> waveGroups_;
   std::map<std::string, std::vector<std::pair<std::string, int>>> sortedPriorityCache_;
+  std::map<std::string, bool> priorityLocked_;
+  std::unordered_map<std::string, std::string> lastToGreen_;
+
   boost::asio::io_context m_ioCtx;
   ndn::Face m_face{m_ioCtx};
   ndn::KeyChain m_keyChain;
@@ -64,8 +72,10 @@ private:
   std::string prefix_;
   int id_;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
+  std::vector<int> rttHistory_;
+  static constexpr size_t RTT_WINDOW_SIZE = 10;
+
   std::mutex mutex_; 
-  uint64_t clockTimestampMs_ = 0;
   std::string lastModified;
 };
 

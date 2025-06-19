@@ -37,8 +37,8 @@ protected:
   void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) override;
 
 private:
-    void startCycle(size_t index);
-    void cycle(size_t index);
+    void startCycle();
+    void cycle();
 
     void generateTraffic();
     void passVehicles();
@@ -47,7 +47,7 @@ private:
     float calculatePriority();
 
     std::vector<Command> parseContent(const std::string& rawCommand);
-    void applyCommand(const Command& cmd);
+    bool applyCommand(const Command& cmd);
 
     void updateColorVectorTime(Color color, int newTime);
     int getDefaultColorTime(Color color) const;
@@ -72,6 +72,7 @@ private:
 
     Color start_color = Color::UNKNOWN;
     Color current_color = Color::UNKNOWN;
+    size_t index;
 
     int cycle_time = 0;
     int columns = 0;

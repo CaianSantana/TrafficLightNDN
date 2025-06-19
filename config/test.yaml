@@ -22,11 +22,18 @@ traffic-lights:
 
   - name: "/salvador/barbalho/rua2/1"
     cycle_time: 90
-    state: "RED"
+    state: "GREEN"
     columns: 2
     lines: 4
-    intensity: "NONE"
+    intensity: "MEDIUM"
+
+  - name: "/salvador/barbalho/rua3/1"
+    cycle_time: 90
+    state: "GREEN"
+    columns: 2
+    lines: 4
+    intensity: "MEDIUM"
 
 intersections:
-  - name: "rua1xrua2"
-    traffic-lights: ["/salvador/barbalho/rua1/1", "/salvador/barbalho/rua2/1"]
+  - name: "rua1xrua2xrua3"
+    traffic-lights: ["/salvador/barbalho/rua1/1", "/salvador/barbalho/rua2/1", "/salvador/barbalho/rua3/1"]
