@@ -54,7 +54,6 @@ private:
 
     void adjustTime(uint64_t correctedCentralTime);
     uint64_t correctCentralTime(uint64_t centralTime);
-    std::chrono::steady_clock::duration calculateRTT();
 
 private:
     std::thread m_cycleThread;

@@ -228,18 +228,6 @@ void SmartTrafficLight::onData(const ndn::Interest& interest, const ndn::Data& d
     }
 }
 
-std::chrono::steady_clock::duration SmartTrafficLight::calculateRTT() {
-    if (lastInterestTimestamp_ == std::chrono::steady_clock::time_point{}) {
-        return std::chrono::milliseconds(0);
-    }
-    auto now = std::chrono::steady_clock::now();
-    auto diff = now - lastInterestTimestamp_;
-    if (diff.count() < 0) {
-        return std::chrono::milliseconds(0);
-    }
-    return diff / 2;
-}
-
 std::vector<Command> SmartTrafficLight::parseContent(const std::string& rawCommand) {
     std::vector<Command> commands;
     std::istringstream ss(rawCommand);
@@ -271,10 +259,8 @@ bool SmartTrafficLight::applyCommand(const Command& cmd) {
         int newTime;
         if (cmd.value == "DEFAULT") {
             newTime = getDefaultColorTime(current_color);
-            //std::cout << "Tempo redefinido para padrão: " << newTime << std::endl;
         } else {
             newTime = std::stoi(cmd.value);
-            //std::cout << "Tempo redefinido para personalizado: " << newTime << std::endl;
         }
         if (current_color == Color::ALERT){
             time_left = newTime;
@@ -288,9 +274,8 @@ bool SmartTrafficLight::applyCommand(const Command& cmd) {
         updateColorVectorTime(Color::RED, newTime);
     }else if (cmd.type == "set_current_time"){
         int newTime = std::stoi(cmd.value); 
-        int rtt = duration_cast<milliseconds>(calculateRTT()).count();
-        newTime =newTime - rtt;
         time_left = newTime / 1000; 
+        std::cout << "time_left: " << time_left << std::endl;
         auto now = std::chrono::steady_clock::now();
     }else if (cmd.type == "set_configured_time"){
         time_left= colors_vector[index].second;

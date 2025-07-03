@@ -43,15 +43,25 @@ void YamlParser::parse(const YAML::Node& config) {
         light.endTime = std::chrono::steady_clock::now() + std::chrono::seconds(duration);
         trafficLights[name] = light;
     }
+    if (config["intersections"]) {
+        for (const auto& node : config["intersections"]) {
+            std::string crossName = node["name"].as<std::string>();
+            std::vector<std::string> sems = node["traffic-lights"].as<std::vector<std::string>>();
 
-    for (const auto& node : config["intersections"]) {
-        std::string crossName = node["name"].as<std::string>();
-        std::vector<std::string> sems = node["traffic-lights"].as<std::vector<std::string>>();
-
-        Intersection cross;
-        cross.name = crossName;
-        cross.trafficLightNames = sems;
-        intersections[crossName] = cross;
+            Intersection cross;
+            cross.name = crossName;
+            cross.trafficLightNames = sems;
+            intersections[crossName] = cross;
+        }
+    }
+    if (config["green_waves"]) {
+        for (const auto& node : config["green_waves"]) {
+            GreenWaveGroup wave;
+            wave.name = node["name"].as<std::string>();
+            wave.trafficLightNames = node["traffic_lights"].as<std::vector<std::string>>();
+            wave.travelTimeMs = node["travel_time_ms"].as<int>();
+            greenWaves.push_back(wave);
+        }
     }
 }
 
@@ -63,6 +73,10 @@ const std::map<std::string, TrafficLightState>& YamlParser::getTrafficLights() c
 
 const std::map<std::string, Intersection>& YamlParser::getIntersections() const {
     return intersections;
+}
+
+const std::vector<GreenWaveGroup>& YamlParser::getGreenWaves()  const {
+    return greenWaves;
 }
 
 std::optional<TrafficLightState> YamlParser::getTrafficLightByIndex(int index) const {

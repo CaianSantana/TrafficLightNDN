@@ -30,6 +30,8 @@ struct TrafficLightState {
 struct Intersection {
     std::string name;
     std::vector<std::string> trafficLightNames;
+    bool isCompromised = false;
+    bool needsNormalization = false; 
 
     bool contains(const std::string& name) const {
         return std::find(trafficLightNames.begin(), trafficLightNames.end(), name) != trafficLightNames.end();
@@ -39,4 +41,10 @@ struct Intersection {
 struct Command {
     std::string type;
     std::string value;
+};
+
+struct GreenWaveGroup {
+    std::string name;
+    std::vector<std::string> trafficLightNames; // Nomes em ordem sequencial
+    int travelTimeMs;
 };

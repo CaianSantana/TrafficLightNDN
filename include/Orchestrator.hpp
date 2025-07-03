@@ -1,27 +1,59 @@
 #ifndef ORCHESTRATOR_HPP
 #define ORCHESTRATOR_HPP
 
-#define MIN_PRIORITY 20
-#define TVD_BASE 15000
-#define TVD_BONUS 5000
-#define TA 3000
+// =================================================================================
+// Arquivo de Configuração
+// =================================================================================
+namespace config {
+  constexpr int INCREASE_GREEN_MS = 5000;
+  constexpr int DECREASE_RED_MS = 3000;
+  constexpr int MIN_PRIORITY = 20;
+  constexpr int YELLOW_TIME_MS = 3000;
+  constexpr int GREEN_BASE_TIME_MS = 15000;
+  constexpr int RTT_WINDOW_SIZE = 10;
+  constexpr int RECOVERY_RED_TIME_MS = 5000; 
 
+}
+
+// =================================================================================
+// Includes da Standard Library
+// =================================================================================
+#include <string>
+#include <vector>
+#include <map>
 #include <unordered_map>
 #include <mutex>
-#include <algorithm>
-#include "ProConInterface.hpp"
+#include <thread> 
+#include <atomic> 
+#include <chrono> 
+#include <optional>
+#include <cstddef>
+
+// =================================================================================
+// Includes da Biblioteca NDN-CXX
+// =================================================================================
+#include <ndn-cxx/face.hpp>
+#include <ndn-cxx/interest.hpp>
+#include <ndn-cxx/data.hpp>
+#include <ndn-cxx/lp/nack.hpp>
+#include <ndn-cxx/security/key-chain.hpp>
+#include <ndn-cxx/security/validator-config.hpp>
+#include <ndn-cxx/util/scheduler.hpp>
 #include <ndn-cxx/util/time.hpp>
 
-
-
-#include "Structs.hpp"
-
-
+// =================================================================================
+// Includes do Projeto
+// =================================================================================
+#include "ProConInterface.hpp" 
+#include "Structs.hpp"         
 
 class Orchestrator : public ndn::ProConInterface {
 public:
   Orchestrator();
   ~Orchestrator() override;
+
+  Orchestrator(const Orchestrator&) = delete;
+  Orchestrator& operator=(const Orchestrator&) = delete;
 
   void loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
                     const std::map<std::string, Intersection>& intersections);
@@ -32,51 +64,58 @@ public:
 protected:
   void runProducer(const std::string& suffix) override;
   void runConsumer() override;
-
+  
+  void onInterest(const ndn::Interest& interest) override;
   void onData(const ndn::Interest&, const ndn::Data& data) override;
   void onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) override;
   void onTimeout(const ndn::Interest& interest) override;
-
+  void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) override;
+  
   ndn::Interest createInterest(const ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) override;
   void sendInterest(const ndn::Interest& interest) override;
 
-  void onInterest(const ndn::Interest& interest) override;
-  void onRegisterFailed(const ndn::Name& prefix, const std::string& reason) override;
-
 private:
-  void produceCommand(const std::string& trafficLightName, const ndn::Interest& interest);
-  std::string delegateCommandTo(const std::string& name);
-  float getAveragePrioritySTL();
-  std::string handleIntersectionLogic(const std::string& intersectionName, const std::string& trafficLightName);
-  std::string synchronize(const std::string& intersectionName, const std::string& requester);
-  bool processGreenWave();
+  void cycle();
+  void produce(const std::string& trafficLightName, const ndn::Interest& interest);
+  
+  void assembleCommandFor(const std::string& name);
+  void generateSyncCommand(const Intersection& intersection, const std::string& requesterName);
+  void forceCycleStart(const std::string& intersectionName);
+  void triggerGreenWave(const std::string& baseLightName);
+
+  
   void updatePriorityList(const std::string& intersectionName);
+  
+  float getAveragePrioritySTL();
   int recordRTT(const std::string& interestName);
   int getAverageRTT() const;
-
+  const Intersection* findIntersectionFor(const std::string& lightName) const;
 
 private:
+  boost::asio::io_context m_ioCtx;
+  long long m_cycleCount = 0;
+  ndn::Face m_face;
+  ndn::KeyChain m_keyChain;
+  ndn::ValidatorConfig m_validator;
+  ndn::Scheduler m_scheduler;
+  ndn::ScopedRegisteredPrefixHandle m_certServeHandle;
+  
+  std::jthread m_cycleThread;
+  std::atomic_bool m_stopFlag{false};
+  mutable std::mutex mutex_;
+
+  std::string prefix_;
   std::map<std::string, TrafficLightState> trafficLights_;
   std::map<std::string, Intersection> intersections_;
-  std::map<std::string, std::vector<std::string>> waveGroups_;
   std::map<std::string, std::vector<std::pair<std::string, int>>> sortedPriorityCache_;
-  std::map<std::string, bool> priorityLocked_;
-  std::unordered_map<std::string, std::string> lastToGreen_;
+  std::map<std::string, std::chrono::steady_clock::time_point> m_lastPriorityCommandTime;
+  std::map<std::string, std::string> m_activeLightPerIntersection;
 
-  boost::asio::io_context m_ioCtx;
-  ndn::Face m_face{m_ioCtx};
-  ndn::KeyChain m_keyChain;
-  ndn::ScopedRegisteredPrefixHandle m_certServeHandle;
-  ndn::ValidatorConfig m_validator;
-  ndn::Scheduler m_scheduler{m_ioCtx};
-  std::string prefix_;
-  int id_;
-  std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
-  std::vector<int> rttHistory_;
-  static constexpr size_t RTT_WINDOW_SIZE = 10;
-
-  std::mutex mutex_; 
+  std::vector<GreenWaveGroup> m_greenWaves;
   std::string lastModified;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
+  std::map<std::string, int> m_allRedCounter;
+  std::vector<int> rttHistory_;
 };
 
 #endif // ORCHESTRATOR_HPP
