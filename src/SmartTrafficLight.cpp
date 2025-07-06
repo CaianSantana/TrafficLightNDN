@@ -146,7 +146,7 @@ void SmartTrafficLight::generateTraffic() {
 
 void SmartTrafficLight::runConsumer() {
     m_scheduler.schedule(ndn::time::seconds(1), [this] {
-        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 100_ms);
+        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 50_ms);
         sendInterest(interestCommand);
         runConsumer();
     });
@@ -266,29 +266,30 @@ bool SmartTrafficLight::applyCommand(const Command& cmd) {
             time_left = newTime;
         }
         updateColorVectorTime(current_color, newTime);
-    }else if (cmd.type == "set_GREEN_time"){
+    }else if (cmd.type == "set_green_duration"){
         int newTime = std::stoi(cmd.value)/1000;
         updateColorVectorTime(Color::GREEN, newTime);
-    }else if (cmd.type == "set_RED_time"){
+        //std::cout << "Tempo configurado para: " << colors_vector[index].second <<std::endl;
+    }else if (cmd.type == "set_red_duration"){
         int newTime = std::stoi(cmd.value)/1000;
         updateColorVectorTime(Color::RED, newTime);
     }else if (cmd.type == "set_current_time"){
         int newTime = std::stoi(cmd.value); 
         time_left = newTime / 1000; 
-        std::cout << "time_left: " << time_left << std::endl;
+        //std::cout << "time_left: " << time_left << std::endl;
         auto now = std::chrono::steady_clock::now();
     }else if (cmd.type == "set_configured_time"){
         time_left= colors_vector[index].second;
-        std::cout << "Tempo configurado para: " << colors_vector[index].second << " Novo tempo: " << time_left <<std::endl;
+        //std::cout << "Tempo configurado para: " << colors_vector[index].second << " Novo tempo: " << time_left <<std::endl;
     }else if (cmd.type == "increase_time") {
         int increment = std::stoi(cmd.value);
         updateColorVectorTime(current_color, colors_vector[index].second+increment/1000);
-        std::cout << "Aumentando o tempo em: " << increment << " Novo tempo: " << colors_vector[index].second <<std::endl;
+        //std::cout << "Aumentando o tempo em: " << increment << " Novo tempo: " << colors_vector[index].second <<std::endl;
     }
     else if (cmd.type == "decrease_time") {
         int decrement = std::stoi(cmd.value);
         updateColorVectorTime(current_color, colors_vector[index].second-std::max(1, decrement/1000));
-        std::cout << "Diminuindo o tempo em: " << decrement << " Novo tempo: " << colors_vector[index].second <<std::endl;
+        //std::cout << "Diminuindo o tempo em: " << decrement << " Novo tempo: " << colors_vector[index].second <<std::endl;
     }
     return true;
 }

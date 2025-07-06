@@ -45,6 +45,7 @@ struct Command {
 
 struct GreenWaveGroup {
     std::string name;
-    std::vector<std::string> trafficLightNames; // Nomes em ordem sequencial
+    std::vector<std::string> trafficLightNames;
     int travelTimeMs;
+    bool hasBeenTriggered = false; 
 };

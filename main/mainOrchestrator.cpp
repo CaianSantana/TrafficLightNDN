@@ -4,11 +4,12 @@
 int main() {
     YamlParser parser("../config/test.yaml");
 
-    auto semaforos = parser.getTrafficLights();
-    auto cruzamentos = parser.getIntersections();
+    auto trafficLights = parser.getTrafficLights();
+    auto intersections = parser.getIntersections();
+    auto greenWaves = parser.getGreenWaves();
 
     Orchestrator orch = Orchestrator(); 
-    orch.loadTopology(semaforos, cruzamentos);
+    orch.loadTopology(trafficLights, intersections, greenWaves);
     orch.setup("/central");
     orch.run();
 

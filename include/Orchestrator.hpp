@@ -12,6 +12,7 @@ namespace config {
   constexpr int GREEN_BASE_TIME_MS = 15000;
   constexpr int RTT_WINDOW_SIZE = 10;
   constexpr int RECOVERY_RED_TIME_MS = 5000; 
+  constexpr double LOW_PRIORITY_WAVE_FACTOR = 0.75; 
 
 }
 
@@ -56,7 +57,8 @@ public:
   Orchestrator& operator=(const Orchestrator&) = delete;
 
   void loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
-                    const std::map<std::string, Intersection>& intersections);
+                    const std::map<std::string, Intersection>& intersections,
+                    const std::vector<GreenWaveGroup>& greenWaves);
 
   void setup(const std::string& prefix) override;
   void run() override;
@@ -81,7 +83,7 @@ private:
   void assembleCommandFor(const std::string& name);
   void generateSyncCommand(const Intersection& intersection, const std::string& requesterName);
   void forceCycleStart(const std::string& intersectionName);
-  void triggerGreenWave(const std::string& baseLightName);
+  void processActiveGreenWave(const GreenWaveGroup& wave);
 
   
   void updatePriorityList(const std::string& intersectionName);
@@ -107,11 +109,12 @@ private:
   std::string prefix_;
   std::map<std::string, TrafficLightState> trafficLights_;
   std::map<std::string, Intersection> intersections_;
+  std::vector<GreenWaveGroup> greenWaves_;
   std::map<std::string, std::vector<std::pair<std::string, int>>> sortedPriorityCache_;
   std::map<std::string, std::chrono::steady_clock::time_point> m_lastPriorityCommandTime;
   std::map<std::string, std::string> m_activeLightPerIntersection;
 
-  std::vector<GreenWaveGroup> m_greenWaves;
+  
   std::string lastModified;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
   std::map<std::string, int> m_allRedCounter;
