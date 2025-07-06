@@ -80,15 +80,12 @@ private:
   void cycle();
   void produce(const std::string& trafficLightName, const ndn::Interest& interest);
   
-  void assembleCommandFor(const std::string& name);
   void generateSyncCommand(const Intersection& intersection, const std::string& requesterName);
   void forceCycleStart(const std::string& intersectionName);
   void processActiveGreenWave(const GreenWaveGroup& wave);
 
-  
   void updatePriorityList(const std::string& intersectionName);
   
-  float getAveragePrioritySTL();
   int recordRTT(const std::string& interestName);
   int getAverageRTT() const;
   const Intersection* findIntersectionFor(const std::string& lightName) const;
