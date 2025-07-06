@@ -49,3 +49,8 @@ struct GreenWaveGroup {
     int travelTimeMs;
     bool hasBeenTriggered = false; 
 };
+
+struct SyncGroup {
+    std::string name;
+    std::vector<std::string> trafficLightNames;
+};

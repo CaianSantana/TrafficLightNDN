@@ -21,7 +21,8 @@ void Orchestrator::setup(const std::string& prefix) {
 
 void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
                                 const std::map<std::string, Intersection>& intersections,
-                                const std::vector<GreenWaveGroup>& greenWaves)
+                                const std::vector<GreenWaveGroup>& greenWaves,
+                                const std::vector<SyncGroup>& syncGroups)
 {
     trafficLights_ = trafficLights;
     for (auto& [name, state] : trafficLights_) {
@@ -29,6 +30,7 @@ void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& 
     }
     intersections_ = intersections;
     greenWaves_ = greenWaves;
+    syncGroups_ = syncGroups;
 
     std::cout << "[SETUP] Semáforos carregados:" << std::endl;
     for (const auto& [name, _] : trafficLights_) {
@@ -48,6 +50,15 @@ void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& 
     for (const auto& wave : greenWaves_) {
         std::cout << " - " << wave.name << " (Tempo de viagem: " << wave.travelTimeMs << "ms): ";
         for (const auto& light : wave.trafficLightNames) {
+            std::cout << light << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    std::cout << "[SETUP] Grupos de Sincronia carregados:" << std::endl;
+    for (const auto& group : syncGroups_) {
+        std::cout << " - " << group.name << ": ";
+        for (const auto& light : group.trafficLightNames) {
             std::cout << light << " ";
         }
         std::cout << std::endl;
@@ -109,6 +120,7 @@ void Orchestrator::cycle() {
                         wave.hasBeenTriggered = false;
                     }
                 }
+                processSyncGroups();
 
                 for (const auto& lightName : intersectionRef.trafficLightNames) {
                     auto& light = trafficLights_.at(lightName);
@@ -124,10 +136,8 @@ void Orchestrator::cycle() {
             }
         }
 
-        auto cycleDuration = std::chrono::steady_clock::now() - cycleStart;
-        if (cycleDuration < cycleInterval) {
-            std::this_thread::sleep_for(cycleInterval - cycleDuration);
-        }
+        std::this_thread::sleep_for(cycleInterval);
+        
     }
 }
 
@@ -537,6 +547,36 @@ void Orchestrator::processActiveGreenWave(const GreenWaveGroup& wave) {
                     memberTL.state = "GREEN";
                     std::cout << "    - Ação: Fim da sincronização suave. Forçando entrada na onda verde." << std::endl;
                 }
+            }
+        }
+    }
+}
+
+void Orchestrator::processSyncGroups() {
+    auto now = std::chrono::steady_clock::now();
+    for (const auto& group : syncGroups_) {
+        if (group.trafficLightNames.size() < 2){
+          continue;
+        } 
+        const std::string& leaderName = group.trafficLightNames.front();
+        const auto& leaderTL = trafficLights_.at(leaderName);
+        
+        for (size_t i = 1; i < group.trafficLightNames.size(); i++) {
+            const std::string& followerName = group.trafficLightNames[i];
+            auto& followerTL = trafficLights_.at(followerName);
+
+            int remainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(leaderTL.endTime - now).count();
+            int followerRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(followerTL.endTime - now).count();
+
+            if (followerTL.state != leaderTL.state || std::abs(followerRemainingMs - remainingMs) > 1500) {
+                if (remainingMs < 0) continue;
+                
+                followerTL.command = ";set_state:" + leaderTL.state + ";set_current_time:" + std::to_string(remainingMs);
+                followerTL.endTime = leaderTL.endTime;
+                followerTL.state = leaderTL.state;
+                
+                std::cout << "[SYNC_GROUP] Forçando " << followerName << " a sincronizar com o líder " << leaderName 
+                          << " (Estado: " << leaderTL.state << ", Tempo: " << remainingMs << "ms)" << std::endl;
             }
         }
     }

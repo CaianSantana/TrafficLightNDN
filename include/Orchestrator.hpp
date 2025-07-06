@@ -58,7 +58,8 @@ public:
 
   void loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
                     const std::map<std::string, Intersection>& intersections,
-                    const std::vector<GreenWaveGroup>& greenWaves);
+                    const std::vector<GreenWaveGroup>& greenWaves,
+                    const std::vector<SyncGroup>& syncGroups);
 
   void setup(const std::string& prefix) override;
   void run() override;
@@ -83,6 +84,7 @@ private:
   void generateSyncCommand(const Intersection& intersection, const std::string& requesterName);
   void forceCycleStart(const std::string& intersectionName);
   void processActiveGreenWave(const GreenWaveGroup& wave);
+  void processSyncGroups();
 
   void updatePriorityList(const std::string& intersectionName);
   
@@ -107,6 +109,7 @@ private:
   std::map<std::string, TrafficLightState> trafficLights_;
   std::map<std::string, Intersection> intersections_;
   std::vector<GreenWaveGroup> greenWaves_;
+  std::vector<SyncGroup> syncGroups_;
   std::map<std::string, std::vector<std::pair<std::string, int>>> sortedPriorityCache_;
   std::map<std::string, std::chrono::steady_clock::time_point> m_lastPriorityCommandTime;
   std::map<std::string, std::string> m_activeLightPerIntersection;
