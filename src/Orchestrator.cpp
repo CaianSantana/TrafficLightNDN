@@ -235,12 +235,12 @@ void Orchestrator::generateSyncCommand(const Intersection& intersection, const s
     int avgRttOneWay = getAverageRTT() / 2;
 
     if (intersection.needsNormalization) {
-        requesterTL.command = ";set_state:RED;set_current_time:" + std::to_string(config::RECOVERY_RED_TIME_MS);
+        requesterTL.command += ";set_state:RED;set_current_time:" + std::to_string(config::RECOVERY_RED_TIME_MS);
         requesterTL.endTime = now + std::chrono::milliseconds(config::RECOVERY_RED_TIME_MS);
         return; 
     }
     if (intersection.isCompromised) {
-        requesterTL.command = ";set_state:ALERT";
+        requesterTL.command += ";set_state:ALERT";
         return; 
     }
 
@@ -268,7 +268,7 @@ void Orchestrator::generateSyncCommand(const Intersection& intersection, const s
     int currentRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(requesterTL.endTime - now).count();
 
     if (std::abs(currentRemainingMs - activeRemainingMs) > 1000) {
-        requesterTL.command = ";set_state:RED;set_current_time:" + std::to_string(finalCommandTime);
+        requesterTL.command += ";set_state:RED;set_current_time:" + std::to_string(finalCommandTime);
         requesterTL.endTime = now + std::chrono::milliseconds(activeRemainingMs);
     }
 }
@@ -285,12 +285,11 @@ void Orchestrator::forceCycleStart(const std::string& intersectionName) {
     int finalCommandTime = config::GREEN_BASE_TIME_MS - avgRttOneWay;
     if (finalCommandTime < 0) finalCommandTime = 0;
 
-    leaderTL.command = ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
+    leaderTL.command += ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
     leaderTL.endTime = now + std::chrono::milliseconds(config::GREEN_BASE_TIME_MS);
     leaderTL.state = "GREEN";
 
     std::cout << "[WATCHDOG] Cruzamento " << intersectionName << " inativo. Forçando início com " << leaderName << std::endl;
-    triggerGreenWave(leaderName);
 }
 
 void Orchestrator::onInterest(const ndn::Interest& interest) {
@@ -458,53 +457,86 @@ void Orchestrator::processActiveGreenWave(const GreenWaveGroup& wave) {
     const std::string& waveLeaderName = wave.trafficLightNames.front();
     const auto& waveLeaderTL = trafficLights_.at(waveLeaderName);
 
+    std::cout << "[GREEN_WAVE] Processando '" << wave.name << "' liderada por " << waveLeaderName << "." << std::endl;
+
     int leaderRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(waveLeaderTL.endTime - now).count();
     if (leaderRemainingTimeMs < 0) leaderRemainingTimeMs = 0;
 
     for (size_t i = 0; i < wave.trafficLightNames.size(); ++i) {
         const std::string& memberName = wave.trafficLightNames[i];
         if (memberName == waveLeaderName) continue;
+        int offsetMs = static_cast<int>(i) * wave.travelTimeMs;
 
         auto& memberTL = trafficLights_.at(memberName);
         const auto* intersection = findIntersectionFor(memberName);
 
+        std::cout << "  -> Avaliando membro: " << memberName << std::endl;
+
         if (intersection) {
+            std::cout << "    - Status: Faz parte do cruzamento '" << intersection->name << "'." << std::endl;
             if (memberTL.state == "GREEN") {
+                std::cout << "    - Estado Atual: VERDE." << std::endl;
                 int memberRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
                 int timeDiffMs = leaderRemainingTimeMs - memberRemainingTimeMs;
-
-                if (timeDiffMs > 0 && timeDiffMs <= 5000) {
-                    memberTL.command = ";set_current_time:" + std::to_string(leaderRemainingTimeMs);
-                    memberTL.endTime = waveLeaderTL.endTime;
-                }
-                else if (timeDiffMs > 5000) {
-                    memberTL.command = ";increase_time:5000";
-                    memberTL.endTime += std::chrono::seconds(5);
-                }
-            }
-            else {
-                double greenDurationFactor = 1.0;
-                const std::string& competitorName = (intersection->trafficLightNames[0] == memberName)
-                                                  ? intersection->trafficLightNames[1]
-                                                  : intersection->trafficLightNames[0];
-                if (memberTL.priority < trafficLights_.at(competitorName).priority) {
-                    greenDurationFactor = config::LOW_PRIORITY_WAVE_FACTOR;
-                }
-                int finalGreenDurationMs = static_cast<int>(leaderRemainingTimeMs * greenDurationFactor);
                 
-                memberTL.command = ";set_green_duration:" + std::to_string(finalGreenDurationMs);
+                std::cout << "    - Tempo restante (Líder/Membro): " << leaderRemainingTimeMs << "ms / " << memberRemainingTimeMs << "ms. Diferença: " << timeDiffMs << "ms." << std::endl;
+
+                if (timeDiffMs <= offsetMs) {
+                    
+                    memberTL.command += ";set_current_time:" + std::to_string(leaderRemainingTimeMs+offsetMs);
+                    memberTL.endTime = waveLeaderTL.endTime;
+                    std::cout << "    - Ação: Sincronizar tempo com o líder. Comando: " << memberTL.command << std::endl;
+                }
+                else if (timeDiffMs > offsetMs) {
+                    memberTL.command += ";increase_time:" + std::to_string(offsetMs);
+                    memberTL.endTime += std::chrono::seconds(5);
+                    std::cout << "    - Ação: Aumentar tempo em "<< offsetMs << "ms. " << "Comando: " << memberTL.command << std::endl;
+                } else {
+                    std::cout << "    - Ação: Nenhuma (tempo já é maior ou igual ao do líder)." << std::endl;
+                }
             }
+              std::cout << "    - Estado Atual: " << memberTL.state << "." << std::endl;
+              double greenDurationFactor = 1.0;
+              const std::string& competitorName = (intersection->trafficLightNames[0] == memberName)
+                                                ? intersection->trafficLightNames[1]
+                                                : intersection->trafficLightNames[0];
+              if (memberTL.priority < trafficLights_.at(competitorName).priority) {
+                  greenDurationFactor = config::LOW_PRIORITY_WAVE_FACTOR;
+              }
+              int finalGreenDurationMs = static_cast<int>(leaderRemainingTimeMs * greenDurationFactor);
+              
+              memberTL.command += ";set_green_duration:" + std::to_string(finalGreenDurationMs+offsetMs);
+              std::cout << "    - Ação: Enviar comando 'suave' para pré-configurar o próximo verde. Comando: " << memberTL.command << std::endl;
         }
         else {
-            int offsetMs = static_cast<int>(i) * wave.travelTimeMs;
-            if (leaderRemainingTimeMs > offsetMs) {
-                int targetRemainingMs = leaderRemainingTimeMs - offsetMs;
-                int finalCommandTime = targetRemainingMs - (getAverageRTT() / 2);
-                if (finalCommandTime < 0) finalCommandTime = 0;
+            std::cout << "    - Status: Semáforo livre (não está em um cruzamento)." << std::endl;
+            
+            if (memberTL.state == "GREEN") {
+                 int targetRemainingMs = leaderRemainingTimeMs + offsetMs;
+                 int currentRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
+                 if (std::abs(currentRemainingMs - targetRemainingMs) > 1000) {
+                     memberTL.command = ";set_current_time:" + std::to_string(targetRemainingMs);
+                     memberTL.endTime = now + std::chrono::milliseconds(targetRemainingMs);
+                 }
+            }
+            else if (memberTL.state == "RED") {
+                int memberRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
+                
+                if (memberRemainingTimeMs > offsetMs) {
+                    memberTL.command = ";decrease_time:5000";
+                    memberTL.endTime -= std::chrono::seconds(5);
+                    std::cout << "    - Ação: Sincronização suave. Reduzindo tempo de vermelho em " << offsetMs << "ms." << std::endl;
+                }
+                else {
+                    int targetRemainingMs = leaderRemainingTimeMs + offsetMs;
+                    int finalCommandTime = targetRemainingMs - (getAverageRTT() / 2);
+                    if (finalCommandTime < 0) finalCommandTime = 0;
 
-                memberTL.command = ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
-                memberTL.endTime = now + std::chrono::milliseconds(targetRemainingMs);
-                memberTL.state = "GREEN";
+                    memberTL.command = ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
+                    memberTL.endTime = now + std::chrono::milliseconds(targetRemainingMs);
+                    memberTL.state = "GREEN";
+                    std::cout << "    - Ação: Fim da sincronização suave. Forçando entrada na onda verde." << std::endl;
+                }
             }
         }
     }

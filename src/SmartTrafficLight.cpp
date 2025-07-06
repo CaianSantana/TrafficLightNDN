@@ -146,7 +146,7 @@ void SmartTrafficLight::generateTraffic() {
 
 void SmartTrafficLight::runConsumer() {
     m_scheduler.schedule(ndn::time::seconds(1), [this] {
-        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 50_ms);
+        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 950_ms);
         sendInterest(interestCommand);
         runConsumer();
     });
@@ -216,7 +216,6 @@ void SmartTrafficLight::sendInterest(const ndn::Interest& interest) {
 
 void SmartTrafficLight::onData(const ndn::Interest& interest, const ndn::Data& data) {
     std::lock_guard<std::mutex> lock(mutex_);
-
     auto interestUri = data.getName().toUri();
     auto content = std::string(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
 
@@ -283,12 +282,12 @@ bool SmartTrafficLight::applyCommand(const Command& cmd) {
         //std::cout << "Tempo configurado para: " << colors_vector[index].second << " Novo tempo: " << time_left <<std::endl;
     }else if (cmd.type == "increase_time") {
         int increment = std::stoi(cmd.value);
-        updateColorVectorTime(current_color, colors_vector[index].second+increment/1000);
+        time_left += increment/1000;
         //std::cout << "Aumentando o tempo em: " << increment << " Novo tempo: " << colors_vector[index].second <<std::endl;
     }
     else if (cmd.type == "decrease_time") {
         int decrement = std::stoi(cmd.value);
-        updateColorVectorTime(current_color, colors_vector[index].second-std::max(1, decrement/1000));
+        time_left -= decrement/1000; 
         //std::cout << "Diminuindo o tempo em: " << decrement << " Novo tempo: " << colors_vector[index].second <<std::endl;
     }
     return true;

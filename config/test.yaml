@@ -13,7 +13,7 @@ traffic-lights:
     intensity: "MEDIUM" 
   - name: "/salvador/barbalho/rua1/3"
     cycle_time: 60
-    state: "GREEN"
+    state: "RED"
     columns: 3
     lines: 2
     intensity: "LOW" 
