@@ -3,13 +3,14 @@
 #include <iostream> 
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Erro: O caminho para o arquivo .yaml de configuração não foi fornecido." << std::endl;
-        std::cerr << "Uso: " << argv[0] << " <caminho_para_o_arquivo.yaml>" << std::endl;
-        return 1; // Retorna um código de erro
+    if (argc < 3) {
+        std::cerr << "Uso: " << argv[0] << " <caminho_yaml> <log_level>" << std::endl;
+        std::cerr << "Níveis de log disponíveis: NONE, ERROR, INFO, DEBUG" << std::endl;
+        return 1;
     }
 
     YamlParser parser(argv[1]);
+    LogLevel logLevel = parseLogLevel(argv[2]);
 
     auto trafficLights = parser.getTrafficLights();
     auto intersections = parser.getIntersections();
@@ -17,8 +18,8 @@ int main(int argc, char* argv[]) {
     auto syncGroups = parser.getSyncGroups();
 
     Orchestrator orch = Orchestrator();
-    orch.loadTopology(trafficLights, intersections, greenWaves, syncGroups);
     orch.setup("/central");
+    orch.loadConfig(trafficLights, intersections, greenWaves, syncGroups, logLevel);
     orch.run();
 
     return 0;
