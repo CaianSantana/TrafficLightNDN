@@ -1,31 +1,31 @@
 traffic-lights:
-  - name: "/salvador/r-rodoviarios/s-cabula/1"
+  - name: "/ssa/r-rodoviarios/s-cabula/1"
     cycle_time: 60
     state: "GREEN"
     columns: 3
     lines: 2
     intensity: "HIGH" 
-  - name: "/salvador/r-rodoviarios/s-cabula/2"
+  - name: "/ssa/r-rodoviarios/s-cabula/2"
     cycle_time: 30
     state: "GREEN"
     columns: 3
     lines: 2
     intensity: "MEDIUM" 
-  - name: "/salvador/r-silveira-martins/s-cabula/1"
+  - name: "/ssa/r-silveira-martins/s-cabula/1"
     cycle_time: 60
     state: "RED"
     columns: 3
     lines: 2
     intensity: "LOW" 
 
-  - name: "/salvador/r-silveira-martins/s-rotula-abacaxi/1"
+  - name: "/ssa/r-silveira-martins/s-rotula-abacaxi/1"
     cycle_time: 60
     state: "RED"
     columns: 3
     lines: 2
     intensity: "LOW" 
 
-  - name: "/salvador/r-thomaz-gonzaga/s-rotula-abacaxi/1"
+  - name: "/ssa/r-thomaz-gonzaga/s-rotula-abacaxi/1"
     cycle_time: 60
     state: "GREEN"
     columns: 2
@@ -34,18 +34,18 @@ traffic-lights:
 
 intersections:
   - name: "praca-f-manoel"
-    traffic-lights: ["/salvador/r-rodoviarios/s-cabula/2", "/salvador/r-thomaz-gonzaga/s-rotula-abacaxi/1"]
+    traffic-lights: ["/ssa/r-rodoviarios/s-cabula/2", "/ssa/r-thomaz-gonzaga/s-rotula-abacaxi/1"]
   
 green_waves:
   - name: "s-cabula-1"
     traffic_lights:
-      - "/salvador/r-rodoviarios/s-cabula/1"
-      - "/salvador/r-rodoviarios/s-cabula/2"
-      - "/salvador/r-silveira-martins/s-cabula/1"
+      - "/ssa/r-rodoviarios/s-cabula/1"
+      - "/ssa/r-rodoviarios/s-cabula/2"
+      - "/ssa/r-silveira-martins/s-cabula/1"
     travel_time_ms: 2000
 
 sync_groups:
   - name: "travessia-pedestres-s-cabula-1"
     traffic_lights:
-      - "/salvador/r-silveira-martins/s-cabula/1"
-      - "/salvador/r-silveira-martins/s-rotula-abacaxi/1" 
+      - "/ssa/r-silveira-martins/s-cabula/1"
+      - "/ssa/r-silveira-martins/s-rotula-abacaxi/1" 

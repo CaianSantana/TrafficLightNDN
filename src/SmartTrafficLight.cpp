@@ -20,8 +20,10 @@ void SmartTrafficLight::setup(const std::string& prefix){
     central = prefix;
 }
 
-void SmartTrafficLight::loadConfig(const TrafficLightState& config) {
-    constexpr int TA = 3; // Tempo amarelo em segundos
+void SmartTrafficLight::loadConfig(const TrafficLightState& config, LogLevel level) {
+    this->m_logLevel = level;
+
+    constexpr int TA = 3; 
 
     this->prefix_ = config.name;
     this->start_color = parseColor(config.state);
@@ -39,6 +41,23 @@ void SmartTrafficLight::loadConfig(const TrafficLightState& config) {
         {"RED", cycle_time / 2}
     };
     default_colors_vector = colors_vector;
+    
+    log(LogLevel::INFO, "Configuração carregada com sucesso.");
+}
+
+void SmartTrafficLight::log(LogLevel level, const std::string& message) {
+    if (level <= m_logLevel) {
+        std::string levelStr;
+        switch (level) {
+            case LogLevel::ERROR: levelStr = "[ERROR]"; break;
+            case LogLevel::INFO:  levelStr = "[INFO] "; break;
+            case LogLevel::DEBUG: levelStr = "[DEBUG]"; break;
+            default: return;
+        }
+        
+        auto& stream = (level == LogLevel::ERROR) ? std::cerr : std::cout;
+        stream << levelStr << " [" << this->prefix_ << "] " << message << std::endl;
+    }
 }
 
 void SmartTrafficLight::run() {
@@ -59,20 +78,26 @@ void SmartTrafficLight::startCycle() {
 void SmartTrafficLight::cycle() {
   while (!m_stopFlag) {
     if (current_color == Color::ALERT) {
-      std::cout << prefix_ << " - ALERT state active." << std::endl;
+      log(LogLevel::DEBUG, "Estado de ALERTA ativo.");
       generateTraffic();
-      std::lock_guard<std::mutex> lock(mtx);
+      std::lock_guard<std::mutex> lock(m_mutex);
       passVehicles();
       std::this_thread::sleep_for(std::chrono::seconds(1));
       continue;
     }
 
     const auto& [color_str, seconds] = colors_vector[static_cast<size_t>(current_color)];
+    Color initial_color = current_color;
     time_left = seconds;
     int count = 0;
-
+    log(LogLevel::INFO, ToString(current_color));
     while (time_left > 0 && !m_stopFlag) {
-      std::cout << prefix_ << " - " << ToString(current_color) << ": " << time_left << std::endl;
+      if(current_color != initial_color){
+        log(LogLevel::INFO, ToString(current_color));
+        initial_color=current_color;
+      } 
+      log(LogLevel::DEBUG, ToString(current_color) + ": " + std::to_string(time_left) + " segundos");
+      log(LogLevel::DEBUG, "Veículos no semáforo: " + std::to_string(vehicles));
       generateTraffic();
 
       if (current_color != Color::RED) {
@@ -80,7 +105,7 @@ void SmartTrafficLight::cycle() {
           full_cicle_vehicles_quantity = 0;
         }
         if (vehicles > 0 && count >= 2) {
-          std::lock_guard<std::mutex> lock(mtx);
+          std::lock_guard<std::mutex> lock(m_mutex);
           passVehicles();
         } else {
           count++;
@@ -93,22 +118,16 @@ void SmartTrafficLight::cycle() {
       std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
+    // Troca de cor
     switch (current_color) {
-      case Color::GREEN:
-        current_color = Color::YELLOW;
-        break;
-      case Color::YELLOW:
-        current_color = Color::RED;
-        break;
-      case Color::RED:
-        current_color = Color::GREEN;
-        break;
-      default:
-        break;
+      case Color::GREEN:  current_color = Color::YELLOW; break;
+      case Color::YELLOW: current_color = Color::RED;    break;
+      case Color::RED:    current_color = Color::GREEN;  break;
+      default: break;
     }
   }
 
-  std::cout << prefix_ << " - Cycle thread terminated." << std::endl;
+  log(LogLevel::INFO, "Thread de ciclo finalizada.");
 }
 
 
@@ -116,16 +135,14 @@ void SmartTrafficLight::passVehicles(){
     int vehicles_to_pass = std::min(vehicles, columns);
     vehicles_to_pass = generateNumber(0, vehicles_to_pass);
     vehicles -= vehicles_to_pass;
+    log(LogLevel::DEBUG, "Veículos passaram: " + std::to_string(vehicles_to_pass));
 }
 
 float SmartTrafficLight::calculatePriority() {
     float basePriority = full_cicle_vehicles_quantity * 0.5f
                          + (static_cast<float>(vehicles) / capacity) * 5;
 
-    if (current_color == Color::GREEN) {
-        basePriority += 20.0f; // Bônus por estar verde
-    }
-
+    log(LogLevel::DEBUG, "Prioridade: " + std::to_string(basePriority));
     return basePriority;
 }
 
@@ -140,7 +157,6 @@ void SmartTrafficLight::generateTraffic() {
         vehicles++;
         full_cicle_vehicles_quantity++;
     }
-    //std::cout << prefix_ << " - " << "Vehicles: " << vehicles << std::endl;
 }
 
 
@@ -153,8 +169,8 @@ void SmartTrafficLight::runConsumer() {
 }
 
 void SmartTrafficLight::runProducer(const std::string& suffix){
-    ndn::Name nameSuffix = ndn::Name(prefix_).append(suffix);
-    std::cout << "name suffix " << nameSuffix << std::endl;
+  ndn::Name nameSuffix = ndn::Name(prefix_).append(suffix);
+  log(LogLevel::INFO, "Registrando produtor para o prefixo: " + nameSuffix.toUri());
   m_face.setInterestFilter(nameSuffix,
       [this](const ndn::InterestFilter& filter, const ndn::Interest& interest) {
         this->onInterest(interest);
@@ -168,11 +184,10 @@ void SmartTrafficLight::runProducer(const std::string& suffix){
                                                   m_face.put(cert);
                                                 },
                                                 std::bind(&SmartTrafficLight::onRegisterFailed, this, _1, _2));
-  std::cout << "Producing to " << nameSuffix << std::endl;                                                                
 }
 
 void SmartTrafficLight::onInterest(const ndn::Interest& interest) {
-    //std::cout << "[Producer] Received Interest: " << interest.getName().toUri() << std::endl;
+    log(LogLevel::DEBUG, "Recebeu Interest para: " + interest.getName().toUri());
 
     std::string currentStateStr = ToString(current_color); 
     int remainingMs = time_left * 1000; 
@@ -189,7 +204,6 @@ void SmartTrafficLight::onInterest(const ndn::Interest& interest) {
 
     m_keyChain.sign(*data);
     m_face.put(*data);
-    //std::cout << "[Producer] Data sent: " << interest.getName().toUri() << std::endl;
 
 }
 
@@ -203,25 +217,25 @@ ndn::Interest SmartTrafficLight::createInterest(const ndn::Name& name, bool must
 
 void SmartTrafficLight::sendInterest(const ndn::Interest& interest) {
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
     lastInterestTimestamp_= std::chrono::steady_clock::now();
   }
   m_face.expressInterest(interest,
                         std::bind(&SmartTrafficLight::onData, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&SmartTrafficLight::onNack, this, std::placeholders::_1, std::placeholders::_2),
                         std::bind(&SmartTrafficLight::onTimeout, this, std::placeholders::_1));
-  //std::cout << "[Consumer] Sending Interest to: " << interest.getName().toUri() << std::endl;
+  log(LogLevel::DEBUG, "Enviando Interest para: " + interest.getName().toUri());
 }
 
 
 void SmartTrafficLight::onData(const ndn::Interest& interest, const ndn::Data& data) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(m_mutex);
     auto interestUri = data.getName().toUri();
     auto content = std::string(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
-
+    log(LogLevel::DEBUG, "Recebeu Data de: " + data.getName().toUri());
     std::vector<Command> commands = parseContent(content);
     for (const auto& cmd : commands) {
-        //std::cout << "Comando: " << cmd.type << " Valor: " << cmd.value << std::endl;
+        
         if(!applyCommand(cmd))
             break;
     }
@@ -248,12 +262,12 @@ std::vector<Command> SmartTrafficLight::parseContent(const std::string& rawComma
 
 bool SmartTrafficLight::applyCommand(const Command& cmd) {
     if (cmd.type == "") return false;
-    if (cmd.type == "if_state" and ToString(current_color) != cmd.value) return false;
     if (cmd.type == "set_state") {
         if (cmd.value == "GREEN") current_color = Color::GREEN;
         else if (cmd.value == "YELLOW") current_color = Color::YELLOW;
         else if (cmd.value == "RED") current_color = Color::RED;
         else current_color = Color::ALERT;
+        log(LogLevel::DEBUG, "Cor alterada para " + cmd.value);
     }else if (cmd.type == "set_time") {
         int newTime;
         if (cmd.value == "DEFAULT") {
@@ -268,27 +282,25 @@ bool SmartTrafficLight::applyCommand(const Command& cmd) {
     }else if (cmd.type == "set_green_duration"){
         int newTime = std::stoi(cmd.value)/1000;
         updateColorVectorTime(Color::GREEN, newTime);
-        //std::cout << "Tempo configurado para: " << colors_vector[index].second <<std::endl;
+        log(LogLevel::DEBUG, "Tempo verde alterado para " + std::to_string(newTime));
     }else if (cmd.type == "set_red_duration"){
         int newTime = std::stoi(cmd.value)/1000;
         updateColorVectorTime(Color::RED, newTime);
+        log(LogLevel::DEBUG, "Tempo vermelho alterado para " + std::to_string(newTime));
     }else if (cmd.type == "set_current_time"){
         int newTime = std::stoi(cmd.value); 
         time_left = newTime / 1000; 
-        //std::cout << "time_left: " << time_left << std::endl;
+        log(LogLevel::DEBUG, "Tempo alterado para " + std::to_string(time_left));
         auto now = std::chrono::steady_clock::now();
-    }else if (cmd.type == "set_configured_time"){
-        time_left= colors_vector[index].second;
-        //std::cout << "Tempo configurado para: " << colors_vector[index].second << " Novo tempo: " << time_left <<std::endl;
     }else if (cmd.type == "increase_time") {
         int increment = std::stoi(cmd.value);
         time_left += increment/1000;
-        //std::cout << "Aumentando o tempo em: " << increment << " Novo tempo: " << colors_vector[index].second <<std::endl;
+        log(LogLevel::DEBUG, "Tempo aumentado em " + std::to_string(increment) + "s.");
     }
     else if (cmd.type == "decrease_time") {
         int decrement = std::stoi(cmd.value);
         time_left -= decrement/1000; 
-        //std::cout << "Diminuindo o tempo em: " << decrement << " Novo tempo: " << colors_vector[index].second <<std::endl;
+        log(LogLevel::DEBUG, "Tempo diminuido em " + std::to_string(decrement) + "s.");
     }
     return true;
 }
@@ -309,13 +321,16 @@ int SmartTrafficLight::getDefaultColorTime(Color color) const {
 }
 
 void SmartTrafficLight::onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) {
-    std::cerr << "[Nack] " << interest.getName().toUri() << " Reason: " << nack.getReason() << std::endl;
+  std::stringstream ss;
+  ss << "NACK para " << interest.getName().toUri() << ". Motivo: " << nack.getReason();
+  log(LogLevel::ERROR, ss.str());
 }
 
 void SmartTrafficLight::onTimeout(const ndn::Interest& interest) {
-    std::cerr << "[Timeout] " << interest.getName().toUri() << std::endl;
+  log(LogLevel::ERROR, "Timeout para " + interest.getName().toUri());
 }
 void SmartTrafficLight::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
-  std::cerr << "Failed to register name: " << nome.toUri() << " Reason: " << reason << std::endl;
+  log(LogLevel::ERROR, "Falha ao registrar prefixo: " + nome.toUri() + ". Motivo: " + reason);
+
 }
 

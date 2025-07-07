@@ -4,6 +4,7 @@
 
 #include "Structs.hpp"
 #include "ProConInterface.hpp"
+#include "LogLevel.hpp" 
 
 #include <thread>
 #include <atomic>
@@ -19,7 +20,7 @@ public:
     SmartTrafficLight();
     ~SmartTrafficLight();
     void setup(const std::string& prefix) override;
-    void loadConfig(const TrafficLightState& config);
+    void loadConfig(const TrafficLightState& config, LogLevel level);
     void run() override;
 
 protected:
@@ -55,6 +56,9 @@ private:
     void adjustTime(uint64_t correctedCentralTime);
     uint64_t correctCentralTime(uint64_t centralTime);
 
+    void log(LogLevel level, const std::string& message);
+
+
 private:
     std::thread m_cycleThread;
     std::atomic_bool m_stopFlag{false};
@@ -64,7 +68,7 @@ private:
     ndn::ScopedRegisteredPrefixHandle m_certServeHandle;
     ndn::ValidatorConfig m_validator;
     ndn::Scheduler m_scheduler{m_ioCtx};
-    std::mutex mutex_; 
+    std::mutex m_mutex; 
 
     std::string central;
     std::string prefix_;
@@ -88,9 +92,10 @@ private:
     std::vector<std::pair<std::string, int>> colors_vector;
     std::vector<std::pair<std::string, int>> default_colors_vector;
 
-    std::mutex mtx;
-
     std::chrono::steady_clock::time_point lastInterestTimestamp_ = steady_clock::now();
+
+    LogLevel m_logLevel = LogLevel::NONE;
+
 };
 
 #endif // SMART_TRAFFIC_LIGHT_HPP
