@@ -146,7 +146,7 @@ void SmartTrafficLight::generateTraffic() {
 
 void SmartTrafficLight::runConsumer() {
     m_scheduler.schedule(ndn::time::seconds(1), [this] {
-        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 950_ms);
+        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 1000_ms);
         sendInterest(interestCommand);
         runConsumer();
     });

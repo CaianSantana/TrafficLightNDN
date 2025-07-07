@@ -74,7 +74,7 @@ void Orchestrator::run() {
 
 void Orchestrator::cycle() {
     const auto cycleInterval = std::chrono::seconds(1);
-    const int allRedTimeoutCycles = 3; 
+    const int allRedTimeoutCycles = 5; 
 
     for (const auto& [interName, intersection] : intersections_) {
         updatePriorityList(interName);
@@ -135,9 +135,7 @@ void Orchestrator::cycle() {
                 }
             }
         }
-
         std::this_thread::sleep_for(cycleInterval);
-        
     }
 }
 
@@ -293,7 +291,7 @@ void Orchestrator::forceCycleStart(const std::string& intersectionName) {
 
     int avgRttOneWay = getAverageRTT() / 2;
     int finalCommandTime = config::GREEN_BASE_TIME_MS - avgRttOneWay;
-    if (finalCommandTime < 0) finalCommandTime = 0;
+    if (finalCommandTime < 0) return;
 
     leaderTL.command += ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
     leaderTL.endTime = now + std::chrono::milliseconds(config::GREEN_BASE_TIME_MS);
