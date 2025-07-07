@@ -17,6 +17,11 @@ struct TrafficLightState {
     int columns = 0;
     int lines = 0;
     Status intensity = Status::NONE; 
+    std::pair<int, bool> adjustment_state{0, true}; 
+    bool partOfIntersection = false;
+    bool partOfGreenWave = false;
+    bool partOfSyncGroup = false;
+
 
     bool isUnknown() const {
         return state == "UNKNOWN";

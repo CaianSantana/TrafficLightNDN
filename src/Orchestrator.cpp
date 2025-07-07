@@ -19,50 +19,60 @@ void Orchestrator::setup(const std::string& prefix) {
   prefix_ = std::move(prefix);
 }
 
-void Orchestrator::loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
+void Orchestrator::loadConfig(const std::map<std::string, TrafficLightState>& trafficLights,
                                 const std::map<std::string, Intersection>& intersections,
                                 const std::vector<GreenWaveGroup>& greenWaves,
-                                const std::vector<SyncGroup>& syncGroups)
+                                const std::vector<SyncGroup>& syncGroups,
+                                LogLevel level)
 {
-    trafficLights_ = trafficLights;
-    for (auto& [name, state] : trafficLights_) {
-      state.command = "";
-    }
-    intersections_ = intersections;
-    greenWaves_ = greenWaves;
-    syncGroups_ = syncGroups;
+  this->m_logLevel = level;  
+  trafficLights_ = trafficLights;
+  for (auto& [name, state] : trafficLights_) {
+    state.command = "";
+  }
+  intersections_ = intersections;
+  greenWaves_ = greenWaves;
+  syncGroups_ = syncGroups;
 
-    std::cout << "[SETUP] Semáforos carregados:" << std::endl;
-    for (const auto& [name, _] : trafficLights_) {
-      std::cout << " - " << name << std::endl;
-    }
+  for (const auto& [intersectionName, intersectionData] : intersections_) {
+      for (const std::string& lightName : intersectionData.trafficLightNames) {
+          auto it = trafficLights_.find(lightName);
+          if (it != trafficLights_.end()) {
+              it->second.partOfIntersection = true;
+          }
+      }
+  }
 
-    std::cout << "[SETUP] Cruzamentos carregados:" << std::endl;
-    for (const auto& [name, intersection] : intersections_) {
-        std::cout << " - " << name << ": ";
-        for (const auto& light : intersection.trafficLightNames) {
-            std::cout << light << " ";
-        }
-        std::cout << std::endl;
-    }
- 
-    std::cout << "[SETUP] Ondas Verdes carregadas:" << std::endl;
-    for (const auto& wave : greenWaves_) {
-        std::cout << " - " << wave.name << " (Tempo de viagem: " << wave.travelTimeMs << "ms): ";
-        for (const auto& light : wave.trafficLightNames) {
-            std::cout << light << " ";
-        }
-        std::cout << std::endl;
-    }
+  for (const auto& wave : greenWaves_) {
+      for (const std::string& lightName : wave.trafficLightNames) {
+          auto it = trafficLights_.find(lightName);
+          if (it != trafficLights_.end()) {
+              it->second.partOfGreenWave = true;
+          }
+      }
+  }
 
-    std::cout << "[SETUP] Grupos de Sincronia carregados:" << std::endl;
-    for (const auto& group : syncGroups_) {
-        std::cout << " - " << group.name << ": ";
-        for (const auto& light : group.trafficLightNames) {
-            std::cout << light << " ";
-        }
-        std::cout << std::endl;
-    }
+  for (const auto& group : syncGroups_) {
+      for (const std::string& lightName : group.trafficLightNames) {
+          auto it = trafficLights_.find(lightName);
+          if (it != trafficLights_.end()) {
+              it->second.partOfSyncGroup = true;
+          }
+      }
+  }
+
+  std::stringstream ss;
+  ss << "Configuração carregada. " << trafficLights_.size() << " semáforos, "
+     << intersections_.size() << " cruzamentos, " << greenWaves_.size() << " ondas verdes e "
+     << syncGroups_.size() << " grupos de sincronia.";
+  log(LogLevel::INFO, ss.str());
+
+  for (const auto& pair : trafficLights_) {
+      log(LogLevel::DEBUG, " - Semáforo: " + pair.first + 
+          " (Cruzamento: " + (pair.second.partOfIntersection ? "S" : "N") +
+          ", Onda Verde: " + (pair.second.partOfGreenWave ? "S" : "N") +
+          ", Grupo Sync: " + (pair.second.partOfSyncGroup ? "S" : "N") + ")");
+  }
 }
 
 void Orchestrator::run() {
@@ -72,13 +82,24 @@ void Orchestrator::run() {
   m_face.processEvents();
 }
 
+void Orchestrator::log(LogLevel level, const std::string& message) {
+    if (level <= m_logLevel) {
+        std::string levelStr;
+        switch (level) {
+            case LogLevel::ERROR: levelStr = "[ERROR]"; break;
+            case LogLevel::INFO:  levelStr = "[INFO] "; break;
+            case LogLevel::DEBUG: levelStr = "[DEBUG]"; break;
+            default: return;
+        }
+        
+        auto& stream = (level == LogLevel::ERROR) ? std::cerr : std::cout;
+        stream << levelStr << " [" << this->prefix_ << "] " << message << std::endl;
+    }
+}
+
 void Orchestrator::cycle() {
     const auto cycleInterval = std::chrono::seconds(1);
     const int allRedTimeoutCycles = 5; 
-
-    for (const auto& [interName, intersection] : intersections_) {
-        updatePriorityList(interName);
-    }
 
     while (!m_stopFlag) {
         auto cycleStart = std::chrono::steady_clock::now();
@@ -86,54 +107,10 @@ void Orchestrator::cycle() {
             std::lock_guard<std::mutex> lock(mutex_);
             auto now = std::chrono::steady_clock::now();
 
-            for (auto& [interName, intersectionRef] : intersections_) {
-                bool isIntersectionActive = false;
-                for (const auto& lightName : intersectionRef.trafficLightNames) {
-                    const auto& state = trafficLights_.at(lightName).state;
-                    if (state == "GREEN" || state == "YELLOW") {
-                        isIntersectionActive = true;
-                        break;
-                    }
-                }
-
-                if (!isIntersectionActive) {
-                    m_allRedCounter[interName]++;
-                    if (m_allRedCounter[interName] >= allRedTimeoutCycles) {
-                        forceCycleStart(interName);
-                        m_allRedCounter[interName] = 0;
-                    }
-                } else {
-                    m_allRedCounter[interName] = 0;
-                }
-
-                for (auto& wave : greenWaves_) {
-                    if (wave.trafficLightNames.empty()) continue;
-
-                    const std::string& waveLeaderName = wave.trafficLightNames.front();
-                    const auto& waveLeaderTL = trafficLights_.at(waveLeaderName);
-
-                    if (waveLeaderTL.state == "GREEN" && !wave.hasBeenTriggered) {
-                        processActiveGreenWave(wave);
-                        wave.hasBeenTriggered = true;
-                    }
-                    else if (waveLeaderTL.state != "GREEN") {
-                        wave.hasBeenTriggered = false;
-                    }
-                }
-                processSyncGroups();
-
-                for (const auto& lightName : intersectionRef.trafficLightNames) {
-                    auto& light = trafficLights_.at(lightName);
-                    if (light.command.empty()){
-                      generateSyncCommand(intersectionRef, lightName);
-                    }
-                }
-                
-                if (intersectionRef.needsNormalization) {
-                    intersectionRef.needsNormalization = false;
-                    std::cout << "[RECOVERY] Fase de normalização concluída para " << interName << ". Retomando ciclo normal." << std::endl;
-                }
-            }
+            if (syncGroups_.size()>0) processSyncGroups();
+            assignPriorityCommands();
+            if (intersections_.size()>0) processIntersections(allRedTimeoutCycles);
+            if (greenWaves_.size()>0) processGreenWaves();
         }
         std::this_thread::sleep_for(cycleInterval);
     }
@@ -154,151 +131,9 @@ void Orchestrator::runProducer(const std::string& suffix){
                                                   m_face.put(cert);
                                                 },
                                                 std::bind(&Orchestrator::onRegisterFailed, this, _1, _2));
-  std::cout << "Producing to " << nameSuffix << std::endl;                                                                
+  log(LogLevel::INFO, "Registrando produtor para o prefixo: " + nameSuffix.toUri());                                                            
 }
 
-void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) {
-  using namespace std::chrono;
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  std::string trafficLightName = interest.getName().toUri();
-  if (trafficLights_.find(trafficLightName) == trafficLights_.end()) {
-    return;
-  }
-  
-  auto& tl = trafficLights_.at(trafficLightName);
-  if (tl.state == "UNKNOWN") {
-    std::cout << "[RECOVERY] Semáforo " << trafficLightName << " voltou a comunicar." << std::endl;
-    
-    const auto* intersection = findIntersectionFor(trafficLightName);
-    if (intersection && intersection->isCompromised) {
-        bool allLightsOk = true;
-        for (const auto& peerLightName : intersection->trafficLightNames) {
-            if (trafficLights_.at(peerLightName).state == "UNKNOWN" && peerLightName != trafficLightName) {
-                allLightsOk = false;
-                break;
-            }
-        }
-        if (allLightsOk) {
-              intersections_.at(intersection->name).isCompromised = false;
-              intersections_.at(intersection->name).needsNormalization = true;
-              std::cout << "[RECOVERY] Cruzamento " << intersection->name << " operacional. Iniciando fase de normalização." << std::endl;
-        }
-    }
-  }
-
-  std::string content(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
-  std::string nameStr = interest.getName().toUri();
-  auto it = interestTimestamps_.find(nameStr);
-  if (it == interestTimestamps_.end()) {
-    std::cerr << "Interest timestamp not found: " << nameStr << std::endl;
-    return;
-  }
-
-  steady_clock::time_point now = steady_clock::now();
-  auto delimiter = '|';
-  std::istringstream iss(content);
-  std::string token;
-  std::vector<std::string> tokens;
-  while (std::getline(iss, token, delimiter)) {
-    tokens.push_back(token);
-  }
-
-  if (tokens.size() < 3) {
-    std::cerr << "Invalid message format: " << content << std::endl;
-    return;
-  }
-
-  std::string state = tokens[0];
-  int remainingMs = std::stoi(tokens[1]);
-
-  int correctedRemainingMs = remainingMs - recordRTT(data.getName().toUri());
-  interestTimestamps_.erase(it);
-  if (correctedRemainingMs < 0)
-    correctedRemainingMs = 0;
-
-  tl.state = state;
-  tl.endTime = now + milliseconds(correctedRemainingMs);
-  tl.priority = std::stof(tokens[2]);
-  tl.timeOutCounter = 0;
-}
-
-void Orchestrator::updatePriorityList(const std::string& intersectionName) {
-    auto it = intersections_.find(intersectionName);
-    if (it == intersections_.end()) return;
-    auto& list = sortedPriorityCache_[intersectionName];
-    list.clear();
-
-    for (const auto& name : it->second.trafficLightNames) {
-        list.emplace_back(name, trafficLights_[name].priority);
-    }
-    std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) {
-        return a.second > b.second;
-    });
-}
-
-void Orchestrator::generateSyncCommand(const Intersection& intersection, const std::string& requesterName) {
-    auto now = std::chrono::steady_clock::now();
-    auto& requesterTL = trafficLights_.at(requesterName);
-    int avgRttOneWay = getAverageRTT() / 2;
-
-    if (intersection.needsNormalization) {
-        requesterTL.command += ";set_state:RED;set_current_time:" + std::to_string(config::RECOVERY_RED_TIME_MS);
-        requesterTL.endTime = now + std::chrono::milliseconds(config::RECOVERY_RED_TIME_MS);
-        return; 
-    }
-    if (intersection.isCompromised) {
-        requesterTL.command += ";set_state:ALERT";
-        return; 
-    }
-
-    std::string activeLightName = "";
-    for (const auto& name : intersection.trafficLightNames) {
-        if (trafficLights_.at(name).state == "GREEN" || trafficLights_.at(name).state == "YELLOW") {
-            activeLightName = name;
-            break;
-        }
-    }
-
-    if (activeLightName.empty() || requesterName == activeLightName) {
-        return;
-    }
-
-    const auto& activeTL = trafficLights_.at(activeLightName);
-    int activeRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(activeTL.endTime - now).count();
-    if (activeTL.state == "GREEN") {
-        activeRemainingMs += config::YELLOW_TIME_MS;
-    }
-
-    int finalCommandTime = activeRemainingMs - avgRttOneWay;
-    if (finalCommandTime < 0) finalCommandTime = 0;
-
-    int currentRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(requesterTL.endTime - now).count();
-
-    if (std::abs(currentRemainingMs - activeRemainingMs) > 1000) {
-        requesterTL.command += ";set_state:RED;set_current_time:" + std::to_string(finalCommandTime);
-        requesterTL.endTime = now + std::chrono::milliseconds(activeRemainingMs);
-    }
-}
-
-void Orchestrator::forceCycleStart(const std::string& intersectionName) {
-    const auto& priorityList = sortedPriorityCache_.at(intersectionName);
-    if (priorityList.empty()) return;
-
-    const std::string& leaderName = priorityList.front().first;
-    auto& leaderTL = trafficLights_.at(leaderName);
-    auto now = std::chrono::steady_clock::now();
-
-    int avgRttOneWay = getAverageRTT() / 2;
-    int finalCommandTime = config::GREEN_BASE_TIME_MS - avgRttOneWay;
-    if (finalCommandTime < 0) return;
-
-    leaderTL.command += ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
-    leaderTL.endTime = now + std::chrono::milliseconds(config::GREEN_BASE_TIME_MS);
-    leaderTL.state = "GREEN";
-
-    std::cout << "[WATCHDOG] Cruzamento " << intersectionName << " inativo. Forçando início com " << leaderName << std::endl;
-}
 
 void Orchestrator::onInterest(const ndn::Interest& interest) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -321,64 +156,53 @@ void Orchestrator::onInterest(const ndn::Interest& interest) {
 
   if (isCommand) {
     if (!trafficLights_.count(trafficLightName)) {
-      std::cerr << "Unknown traffic light for command: " << trafficLightName << std::endl;
+      log(LogLevel::ERROR, "Comando recebido para semáforo desconhecido: " + trafficLightName);
       return;
     }
     return produce(trafficLightName, interest);
   } else {
-    std::cerr << "Invalid suffix." << std::endl;
+    log(LogLevel::ERROR, "Interest com sufixo inválido recebido: " + name.toUri());
     return;
   }
 }
+
 
 void Orchestrator::produce(const std::string& trafficLightName, const ndn::Interest& interest) {
   auto data = std::make_shared<ndn::Data>(interest.getName());
   data->setContent(std::string_view(trafficLights_.at(trafficLightName).command)); 
   data->setFreshnessPeriod(ndn::time::seconds(1));
   trafficLights_.at(trafficLightName).command = "";
+  log(LogLevel::DEBUG, "Enviando Interest para: " + interest.getName().toUri());
   m_keyChain.sign(*data);
   m_face.put(*data);
 }
 
-void Orchestrator::onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) {
-    std::cerr << "Nack received: " << interest.getName().toUri() 
-              << " Reason: " << nack.getReason() << std::endl;
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::string failedLightName = interest.getName().toUri();
-
-    if (trafficLights_.count(failedLightName)) {
-        auto& tl = trafficLights_.at(failedLightName);
-        tl.state = "UNKNOWN"; 
-        const auto* intersection = findIntersectionFor(failedLightName);
-        if (intersection) {
-            intersections_.at(intersection->name).isCompromised = true;
-            std::cout << "[FAULT] Cruzamento " << intersection->name 
-                      << " comprometido devido a Nack em " << failedLightName << std::endl;
-        }
-    }
+void Orchestrator::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
+  log(LogLevel::ERROR, "Falha ao registrar prefixo: " + nome.toUri() + " Motivo: " + reason);
 }
 
-void Orchestrator::onTimeout(const ndn::Interest& interest) {
-    std::cerr << "Interest timeout: " << interest.getName().toUri() << std::endl;
-    std::lock_guard<std::mutex> lock(mutex_); 
 
-    std::string failedLightName = interest.getName().toUri();
 
-    if (trafficLights_.count(failedLightName)) {
-        auto& tl = trafficLights_.at(failedLightName);
-        tl.timeOutCounter++;
-
-        if (tl.timeOutCounter >= 2) {
-            tl.state = "UNKNOWN";
-            const auto* intersection = findIntersectionFor(failedLightName);
-            if (intersection) {
-                intersections_.at(intersection->name).isCompromised = true;
-                std::cout << "[FAULT] Cruzamento " << intersection->name 
-                          << " comprometido devido a Timeouts em " << failedLightName << std::endl;
-            }
+void Orchestrator::runConsumer() {
+    m_scheduler.schedule(1000_ms, [this] {
+    m_cycleCount++;
+    for (const auto& [name, state] : trafficLights_) {
+      if (!state.isUnknown()) {
+        Name interestName(name);
+        auto interest = createInterest(interestName, true, false, 900_ms); 
+        sendInterest(interest);
+      }
+      else {
+        if (m_cycleCount % 5 == 0) {
+            log(LogLevel::INFO, "Tentando contactar o nó falho: " + name);
+            Name interestName(name);
+            auto interest = createInterest(name, true, false, 900_ms);
+            sendInterest(interest);
         }
+      }
     }
+    runConsumer();
+  });
 }
 
 ndn::Interest Orchestrator::createInterest(const ndn::Name& name, bool mustBeFresh, bool canBePrefix, ndn::time::milliseconds lifetime) {
@@ -400,37 +224,121 @@ void Orchestrator::sendInterest(const ndn::Interest& interest) {
                         std::bind(&Orchestrator::onTimeout, this, _1));
 }
 
-void Orchestrator::runConsumer() {
-    m_scheduler.schedule(1000_ms, [this] {
-    m_cycleCount++;
-    for (const auto& [name, state] : trafficLights_) {
-      if (!state.isUnknown()) {
-        Name interestName(name);
-        auto interest = createInterest(interestName, true, false, 900_ms); 
-        sendInterest(interest);
-      }
-      else {
-        if (m_cycleCount % 5 == 0) {
-            std::cout << "[RECOVERY_PING] Tentando contactar o nó falho: " << name << std::endl;
-            Name interestName(name);
-            auto interest = createInterest(name, true, false, 900_ms);
-            sendInterest(interest);
+void Orchestrator::onData(const ndn::Interest& interest, const ndn::Data& data) {
+  using namespace std::chrono;
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  std::string trafficLightName = interest.getName().toUri();
+  if (trafficLights_.find(trafficLightName) == trafficLights_.end()) {
+    return;
+  }
+  
+  auto& tl = trafficLights_.at(trafficLightName);
+  if (tl.state == "UNKNOWN") {
+    log(LogLevel::INFO, "Semáforo " + trafficLightName + " voltou a comunicar.");
+    const auto* intersection = findIntersectionFor(trafficLightName);
+    if (intersection && intersection->isCompromised) {
+        bool allLightsOk = true;
+        for (const auto& peerLightName : intersection->trafficLightNames) {
+            if (trafficLights_.at(peerLightName).state == "UNKNOWN" && peerLightName != trafficLightName) {
+                allLightsOk = false;
+                break;
+            }
         }
-      }
+        if (allLightsOk) {
+              intersections_.at(intersection->name).isCompromised = false;
+              intersections_.at(intersection->name).needsNormalization = true;
+              log(LogLevel::INFO, "Cruzamento " + intersection->name + " operacional. Iniciando fase de normalização.");
+        }
     }
-    runConsumer();
-  });
+  }
+
+  std::string content(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
+  std::string nameStr = interest.getName().toUri();
+  log(LogLevel::DEBUG, "Recebeu Data de: " + data.getName().toUri());
+  auto it = interestTimestamps_.find(nameStr);
+  if (it == interestTimestamps_.end()) {
+    log(LogLevel::ERROR, "Interest timestamp not found:  " + nameStr);
+    return;
+  }
+
+  steady_clock::time_point now = steady_clock::now();
+  auto delimiter = '|';
+  std::istringstream iss(content);
+  std::string token;
+  std::vector<std::string> tokens;
+  while (std::getline(iss, token, delimiter)) {
+    tokens.push_back(token);
+  }
+
+  if (tokens.size() < 3) {
+    log(LogLevel::ERROR, "Invalid message format:  " + content);
+    return;
+  }
+
+  std::string state = tokens[0];
+  int remainingMs = std::stoi(tokens[1]);
+
+  int correctedRemainingMs = remainingMs - recordRTT(data.getName().toUri());
+  interestTimestamps_.erase(it);
+  if (correctedRemainingMs < 0)
+    correctedRemainingMs = 0;
+
+  tl.state = state;
+  tl.endTime = now + milliseconds(correctedRemainingMs);
+  tl.priority = std::stof(tokens[2]);
+  tl.timeOutCounter = 0;
 }
 
-void Orchestrator::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
-  std::cerr << "Failed to register name: " << nome.toUri() << " Reason: " << reason << std::endl;
+void Orchestrator::onNack(const ndn::Interest& interest, const ndn::lp::Nack& nack) {
+    std::stringstream ss;
+    ss << "Nack recebido para " << interest.getName().toUri() << ". Motivo: " << nack.getReason();
+    log(LogLevel::ERROR, ss.str());
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string failedLightName = interest.getName().toUri();
+
+    if (trafficLights_.count(failedLightName)) {
+        auto& tl = trafficLights_.at(failedLightName);
+        tl.state = "UNKNOWN"; 
+        const auto* intersection = findIntersectionFor(failedLightName);
+        if (intersection) {
+            intersections_.at(intersection->name).isCompromised = true;
+            log(LogLevel::ERROR, "Cruzamento " + intersection->name 
+                      + " comprometido devido a Nack em " + failedLightName);
+        }
+    }
 }
+
+
+void Orchestrator::onTimeout(const ndn::Interest& interest) {
+    log(LogLevel::ERROR, "Timeout no Interest para: " + interest.getName().toUri());
+    std::lock_guard<std::mutex> lock(mutex_); 
+
+    std::string failedLightName = interest.getName().toUri();
+
+    if (trafficLights_.count(failedLightName)) {
+        auto& tl = trafficLights_.at(failedLightName);
+        tl.timeOutCounter++;
+
+        if (tl.timeOutCounter >= 2) {
+            tl.state = "UNKNOWN";
+            const auto* intersection = findIntersectionFor(failedLightName);
+            if (intersection) {
+                intersections_.at(intersection->name).isCompromised = true;
+                log(LogLevel::ERROR, "Cruzamento " + intersection->name 
+                          + " comprometido devido a Timeouts em " + failedLightName);
+            }
+        }
+    }
+}
+
 
 int Orchestrator::recordRTT(const std::string& interestName) {
     auto now = std::chrono::steady_clock::now();
     auto it = interestTimestamps_.find(interestName);
     if (it == interestTimestamps_.end()) {
-        std::cerr << "[WARN] Interest não encontrado para calcular RTT: " << interestName << std::endl;
+        log(LogLevel::ERROR, "Timestamp do Interest não encontrado para calcular RTT: " + interestName);
         return 0; 
     }
 
@@ -458,124 +366,312 @@ int Orchestrator::getAverageRTT() const {
     return total / static_cast<int>(rttHistory_.size());
 }
 
-void Orchestrator::processActiveGreenWave(const GreenWaveGroup& wave) {
-    if (wave.trafficLightNames.empty()) return;
+void Orchestrator::processIntersections(const int& allRedTimeoutCycles) {
+    for (auto& [interName, intersectionRef] : intersections_) {
+        updatePriorityList(interName);
+        bool isIntersectionActive = false;
 
-    auto now = std::chrono::steady_clock::now();
-    const std::string& waveLeaderName = wave.trafficLightNames.front();
-    const auto& waveLeaderTL = trafficLights_.at(waveLeaderName);
+        for (const auto& lightName : intersectionRef.trafficLightNames) {
+            auto& light = trafficLights_.at(lightName);
+            const auto& state = light.state;
 
-    std::cout << "[GREEN_WAVE] Processando '" << wave.name << "' liderada por " << waveLeaderName << "." << std::endl;
-
-    int leaderRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(waveLeaderTL.endTime - now).count();
-    if (leaderRemainingTimeMs < 0) leaderRemainingTimeMs = 0;
-
-    for (size_t i = 0; i < wave.trafficLightNames.size(); ++i) {
-        const std::string& memberName = wave.trafficLightNames[i];
-        if (memberName == waveLeaderName) continue;
-        int offsetMs = static_cast<int>(i) * wave.travelTimeMs;
-
-        auto& memberTL = trafficLights_.at(memberName);
-        const auto* intersection = findIntersectionFor(memberName);
-
-        std::cout << "  -> Avaliando membro: " << memberName << std::endl;
-
-        if (intersection) {
-            std::cout << "    - Status: Faz parte do cruzamento '" << intersection->name << "'." << std::endl;
-            if (memberTL.state == "GREEN") {
-                std::cout << "    - Estado Atual: VERDE." << std::endl;
-                int memberRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
-                int timeDiffMs = leaderRemainingTimeMs - memberRemainingTimeMs;
-                
-                std::cout << "    - Tempo restante (Líder/Membro): " << leaderRemainingTimeMs << "ms / " << memberRemainingTimeMs << "ms. Diferença: " << timeDiffMs << "ms." << std::endl;
-
-                if (timeDiffMs <= offsetMs) {
-                    
-                    memberTL.command += ";set_current_time:" + std::to_string(leaderRemainingTimeMs+offsetMs);
-                    memberTL.endTime = waveLeaderTL.endTime;
-                    std::cout << "    - Ação: Sincronizar tempo com o líder. Comando: " << memberTL.command << std::endl;
-                }
-                else if (timeDiffMs > offsetMs) {
-                    memberTL.command += ";increase_time:" + std::to_string(offsetMs);
-                    memberTL.endTime += std::chrono::seconds(5);
-                    std::cout << "    - Ação: Aumentar tempo em "<< offsetMs << "ms. " << "Comando: " << memberTL.command << std::endl;
-                } else {
-                    std::cout << "    - Ação: Nenhuma (tempo já é maior ou igual ao do líder)." << std::endl;
-                }
+            if (light.command.empty()){
+              generateIntersectionCommand(intersectionRef, lightName);
             }
-              std::cout << "    - Estado Atual: " << memberTL.state << "." << std::endl;
-              double greenDurationFactor = 1.0;
-              const std::string& competitorName = (intersection->trafficLightNames[0] == memberName)
-                                                ? intersection->trafficLightNames[1]
-                                                : intersection->trafficLightNames[0];
-              if (memberTL.priority < trafficLights_.at(competitorName).priority) {
-                  greenDurationFactor = config::LOW_PRIORITY_WAVE_FACTOR;
-              }
-              int finalGreenDurationMs = static_cast<int>(leaderRemainingTimeMs * greenDurationFactor);
-              
-              memberTL.command += ";set_green_duration:" + std::to_string(finalGreenDurationMs+offsetMs);
-              std::cout << "    - Ação: Enviar comando 'suave' para pré-configurar o próximo verde. Comando: " << memberTL.command << std::endl;
+
+            if (state == "GREEN" || state == "YELLOW") {
+                isIntersectionActive = true;
+            }
         }
-        else {
-            std::cout << "    - Status: Semáforo livre (não está em um cruzamento)." << std::endl;
-            
-            if (memberTL.state == "GREEN") {
-                 int targetRemainingMs = leaderRemainingTimeMs + offsetMs;
-                 int currentRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
-                 if (std::abs(currentRemainingMs - targetRemainingMs) > 1000) {
-                     memberTL.command = ";set_current_time:" + std::to_string(targetRemainingMs);
-                     memberTL.endTime = now + std::chrono::milliseconds(targetRemainingMs);
-                 }
-            }
-            else if (memberTL.state == "RED") {
-                int memberRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
-                
-                if (memberRemainingTimeMs > offsetMs) {
-                    memberTL.command = ";decrease_time:5000";
-                    memberTL.endTime -= std::chrono::seconds(5);
-                    std::cout << "    - Ação: Sincronização suave. Reduzindo tempo de vermelho em " << offsetMs << "ms." << std::endl;
-                }
-                else {
-                    int targetRemainingMs = leaderRemainingTimeMs + offsetMs;
-                    int finalCommandTime = targetRemainingMs - (getAverageRTT() / 2);
-                    if (finalCommandTime < 0) finalCommandTime = 0;
 
-                    memberTL.command = ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
-                    memberTL.endTime = now + std::chrono::milliseconds(targetRemainingMs);
-                    memberTL.state = "GREEN";
-                    std::cout << "    - Ação: Fim da sincronização suave. Forçando entrada na onda verde." << std::endl;
-                }
+        if (!isIntersectionActive) {
+            m_allRedCounter[interName]++;
+            if (m_allRedCounter[interName] >= allRedTimeoutCycles) {
+                forceCycleStart(interName);
+                m_allRedCounter[interName] = 0;
             }
+        } else {
+            m_allRedCounter[interName] = 0;
+        }
+        
+        if (intersectionRef.needsNormalization) {
+            intersectionRef.needsNormalization = false;
+            log(LogLevel::DEBUG, "Fase de normalização concluída para " + interName + ". Retomando ciclo normal.");
         }
     }
 }
 
+
+void Orchestrator::updatePriorityList(const std::string& intersectionName) {
+    auto it = intersections_.find(intersectionName);
+    if (it == intersections_.end()) return;
+    auto& list = sortedPriorityCache_[intersectionName];
+    list.clear();
+
+    for (const auto& name : it->second.trafficLightNames) {
+        list.emplace_back(name, trafficLights_[name].priority);
+    }
+    std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+}
+
+void Orchestrator::generateIntersectionCommand(const Intersection& intersection, const std::string& requesterName) {
+    auto now = std::chrono::steady_clock::now();
+    auto& requesterTL = trafficLights_.at(requesterName);
+    int avgRttOneWay = getAverageRTT() / 2;
+
+    if (intersection.needsNormalization) {
+        requesterTL.command += ";set_state:RED;set_current_time:" + std::to_string(config::RECOVERY_RED_TIME_MS);
+        requesterTL.endTime = now + std::chrono::milliseconds(config::RECOVERY_RED_TIME_MS);
+        log(LogLevel::DEBUG, "Comando de normalização para " + requesterName + ": " + requesterTL.command);
+        return; 
+    }
+    if (intersection.isCompromised) {
+        requesterTL.command += ";set_state:ALERT";
+        log(LogLevel::DEBUG, "Comando de alerta (cruzamento comprometido) para " + requesterName + ": " + requesterTL.command);
+        return; 
+    }
+
+    std::string activeLightName = "";
+    for (const auto& name : intersection.trafficLightNames) {
+        if (trafficLights_.at(name).state == "GREEN" || trafficLights_.at(name).state == "YELLOW") {
+            activeLightName = name;
+            break;
+        }
+    }
+
+    if (activeLightName.empty() || requesterName == activeLightName) {
+        return;
+    }
+
+    const auto& activeTL = trafficLights_.at(activeLightName);
+    int activeRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(activeTL.endTime - now).count();
+    if (activeTL.state == "GREEN") {
+        activeRemainingMs += config::YELLOW_TIME_MS;
+    }
+
+    int finalCommandTime = activeRemainingMs - avgRttOneWay;
+    if (finalCommandTime < 0) return;
+
+    int currentRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(requesterTL.endTime - now).count();
+
+    if (std::abs(currentRemainingMs - activeRemainingMs) > 2000) {
+        requesterTL.command += ";set_state:RED;set_current_time:" + std::to_string(finalCommandTime);
+        requesterTL.endTime = activeTL.endTime;
+        log(LogLevel::DEBUG, "Comando de sincronia para " + requesterName + ": " + requesterTL.command);
+        return;
+    }
+}
+
+void Orchestrator::forceCycleStart(const std::string& intersectionName) {
+    const auto& priorityList = sortedPriorityCache_.at(intersectionName);
+    if (priorityList.empty()) return;
+
+    const std::string& leaderName = priorityList.front().first;
+    auto& leaderTL = trafficLights_.at(leaderName);
+    auto now = std::chrono::steady_clock::now();
+
+    int avgRttOneWay = getAverageRTT() / 2;
+    int finalCommandTime = config::GREEN_BASE_TIME_MS - avgRttOneWay;
+    if (finalCommandTime < 0) return;
+
+    leaderTL.command += ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
+    leaderTL.endTime = now + std::chrono::milliseconds(config::GREEN_BASE_TIME_MS);
+    leaderTL.state = "GREEN";
+
+    log(LogLevel::INFO, "Cruzamento " + intersectionName + " inativo. Forçando início com " + leaderName);
+    log(LogLevel::DEBUG, "Comando gerado para " + leaderName + ": " + leaderTL.command);
+}
+
+void Orchestrator::processGreenWaves() {
+    for (auto& wave : greenWaves_) {
+        if (wave.trafficLightNames.empty()) {
+            continue;
+        }
+
+        const std::string& waveLeaderName = wave.trafficLightNames.front();
+        const auto& waveLeaderTL = trafficLights_.at(waveLeaderName);
+
+        if (waveLeaderTL.state == "GREEN" && !wave.hasBeenTriggered) {
+            wave.hasBeenTriggered = true; 
+
+            auto now = std::chrono::steady_clock::now();
+            log(LogLevel::INFO, "Processando '" + wave.name + "'.");
+
+            int leaderRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(waveLeaderTL.endTime - now).count();
+            if (leaderRemainingTimeMs < 0) leaderRemainingTimeMs = 0;
+
+            for (size_t i = 0; i < wave.trafficLightNames.size(); ++i) {
+                const std::string& memberName = wave.trafficLightNames[i];
+                if (memberName == waveLeaderName) continue;
+                int offsetMs = static_cast<int>(i) * wave.travelTimeMs;
+
+                auto& memberTL = trafficLights_.at(memberName);
+                const auto* intersection = findIntersectionFor(memberName);
+
+                if (intersection) {
+                    if (memberTL.state == "GREEN") {
+                        int memberRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
+                        int timeDiffMs = leaderRemainingTimeMs - memberRemainingTimeMs;
+
+                        if (timeDiffMs <= offsetMs) {
+                            memberTL.command += ";set_current_time:" + std::to_string(leaderRemainingTimeMs + offsetMs);
+                            memberTL.endTime = waveLeaderTL.endTime;
+                            log(LogLevel::DEBUG, "Comando gerado para " + memberTL.name + ": " + memberTL.command);
+                        }
+                        else if (timeDiffMs > offsetMs) {
+                            memberTL.command += ";increase_time:" + std::to_string(offsetMs);
+                            memberTL.endTime += std::chrono::seconds(5);
+                            log(LogLevel::DEBUG, "Comando gerado para " + memberTL.name + ": " + memberTL.command);
+                        }
+                    }
+                    double greenDurationFactor = 1.0;
+                    const std::string& competitorName = (intersection->trafficLightNames[0] == memberName)
+                                                      ? intersection->trafficLightNames[1]
+                                                      : intersection->trafficLightNames[0];
+                    if (memberTL.priority < trafficLights_.at(competitorName).priority) {
+                        greenDurationFactor = config::LOW_PRIORITY_WAVE_FACTOR;
+                    }
+                    int finalGreenDurationMs = static_cast<int>(leaderRemainingTimeMs * greenDurationFactor);
+
+                    memberTL.command += ";set_green_duration:" + std::to_string(finalGreenDurationMs + offsetMs);
+                    log(LogLevel::DEBUG, "Comando gerado para " + memberTL.name + ": " + memberTL.command);
+                }
+                else { 
+                    if (memberTL.state == "GREEN") {
+                        int targetRemainingMs = leaderRemainingTimeMs + offsetMs;
+                        int currentRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
+                        if (std::abs(currentRemainingMs - targetRemainingMs) > 1000) {
+                            memberTL.command = ";set_current_time:" + std::to_string(targetRemainingMs);
+                            memberTL.endTime = now + std::chrono::milliseconds(targetRemainingMs);
+                            log(LogLevel::DEBUG, "Comando gerado para " + memberTL.name + ": " + memberTL.command);
+                        }
+                    }
+                    else if (memberTL.state == "RED") {
+                        int memberRemainingTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(memberTL.endTime - now).count();
+                        
+                        if (memberRemainingTimeMs > 5000) {
+                            memberTL.command = ";decrease_time:5000";
+                            memberTL.endTime -= std::chrono::milliseconds(offsetMs);
+                            log(LogLevel::DEBUG, "Comando gerado para " + memberTL.name + ": " + memberTL.command);
+                        }
+                        else {
+                            int targetRemainingMs = leaderRemainingTimeMs + offsetMs;
+                            int finalCommandTime = targetRemainingMs - (getAverageRTT() / 2);
+                            if (finalCommandTime < 0) finalCommandTime = 0;
+
+                            memberTL.command = ";set_state:GREEN;set_current_time:" + std::to_string(finalCommandTime);
+                            memberTL.endTime = now + std::chrono::milliseconds(targetRemainingMs);
+                            memberTL.state = "GREEN";
+                            log(LogLevel::DEBUG, "Comando gerado para " + memberTL.name + ": " + memberTL.command);
+                        }
+                    }
+                }
+            }
+        }
+        else if (waveLeaderTL.state != "GREEN") {
+            wave.hasBeenTriggered = false;
+        }
+    }
+}
+
+
 void Orchestrator::processSyncGroups() {
     auto now = std::chrono::steady_clock::now();
+    int avgRttOneWay = getAverageRTT() / 2;
+
     for (const auto& group : syncGroups_) {
-        if (group.trafficLightNames.size() < 2){
-          continue;
-        } 
+        if (group.trafficLightNames.size() < 2) {
+            continue; 
+        }
+
         const std::string& leaderName = group.trafficLightNames.front();
         const auto& leaderTL = trafficLights_.at(leaderName);
-        
+
         for (size_t i = 1; i < group.trafficLightNames.size(); i++) {
             const std::string& followerName = group.trafficLightNames[i];
             auto& followerTL = trafficLights_.at(followerName);
 
             int remainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(leaderTL.endTime - now).count();
+            remainingMs -= avgRttOneWay;
+            
             int followerRemainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(followerTL.endTime - now).count();
 
-            if (followerTL.state != leaderTL.state || std::abs(followerRemainingMs - remainingMs) > 1500) {
-                if (remainingMs < 0) continue;
-                
+            if (followerTL.state != leaderTL.state && std::abs(followerRemainingMs - remainingMs) > 1000) {
+                if (remainingMs < 0) {
+                    continue; 
+                }
+
                 followerTL.command = ";set_state:" + leaderTL.state + ";set_current_time:" + std::to_string(remainingMs);
+                
                 followerTL.endTime = leaderTL.endTime;
                 followerTL.state = leaderTL.state;
-                
-                std::cout << "[SYNC_GROUP] Forçando " << followerName << " a sincronizar com o líder " << leaderName 
-                          << " (Estado: " << leaderTL.state << ", Tempo: " << remainingMs << "ms)" << std::endl;
+
+                std::stringstream ss;
+                ss << "Forçando " << followerName << " a sincronizar com o líder " << leaderName;
+                log(LogLevel::INFO, ss.str());
+                log(LogLevel::DEBUG, "Comando gerado para " + followerName + ": " + followerTL.command);
             }
         }
     }
+}
+
+
+void Orchestrator::assignPriorityCommands() {
+    for (auto& [currentLightName, light] : trafficLights_) {
+        if (light.isAlert() && !light.partOfIntersection) {
+            light.command += ";set_default_duration;set_state:RED;set_current_time:15000"; 
+            log(LogLevel::INFO, "Semáforo " + currentLightName + 
+                                " em ALERTA. Enviando comando para RESETAR DURAÇÕES e ir para o estado VERMELHO.");
+            light.adjustment_state = {0, true};
+            continue; 
+        }
+
+        auto& adjustment = light.adjustment_state;
+        const int MAX_ADJUSTMENTS = 3;
+        const std::string ADJUSTMENT_VALUE_S = "5"; 
+
+        if (light.priority >= config::MIN_PRIORITY) {
+            if (adjustment.second == false) { 
+                if (adjustment.first > 0) {
+                    adjustment.first--;
+                    log(LogLevel::DEBUG, light.name + " pagando débito. Contador: " + std::to_string(adjustment.first));
+                } else { 
+                    adjustment.second = true;
+                    adjustment.first = 1;
+                    light.command += ";increase_green_duration:" + ADJUSTMENT_VALUE_S + ";decrease_red_duration:" + ADJUSTMENT_VALUE_S;
+                    log(LogLevel::INFO, light.name + " (P:" + std::to_string(light.priority) + ") inverteu tendência para GANHAR tempo.");
+                }
+            } else { 
+                if (adjustment.first < MAX_ADJUSTMENTS) {
+                    adjustment.first++;
+                    light.command += ";increase_green_duration:" + ADJUSTMENT_VALUE_S + ";decrease_red_duration:" + ADJUSTMENT_VALUE_S;
+                    log(LogLevel::DEBUG, light.name + " continua a ganhar tempo. Contador: " + std::to_string(adjustment.first));
+                } else {
+                    log(LogLevel::DEBUG, light.name + " no limite de ganho de tempo.");
+                }
+            }
+        } else {
+            if (adjustment.second == true) {
+                if (adjustment.first > 0) { 
+                    adjustment.first--;
+                    log(LogLevel::DEBUG, light.name + " pagando débito. Contador: " + std::to_string(adjustment.first));
+                } else { 
+                    adjustment.second = false;
+                    adjustment.first = 1;
+                    light.command += ";decrease_green_duration:" + ADJUSTMENT_VALUE_S + ";increase_red_duration:" + ADJUSTMENT_VALUE_S;
+                    log(LogLevel::INFO, light.name + " (P:" + std::to_string(light.priority) + ") inverteu tendência para CEDER tempo.");
+                }
+            } else {
+                if (adjustment.first < MAX_ADJUSTMENTS) {
+                    adjustment.first++;
+                    light.command += ";decrease_green_duration:" + ADJUSTMENT_VALUE_S + ";increase_red_duration:" + ADJUSTMENT_VALUE_S;
+                    log(LogLevel::DEBUG, light.name + " continua a ceder tempo. Contador: " + std::to_string(adjustment.first));
+                } else {
+                    log(LogLevel::DEBUG, light.name + " no limite de cessão de tempo.");
+                }
+            }
+        }
+    } 
 }

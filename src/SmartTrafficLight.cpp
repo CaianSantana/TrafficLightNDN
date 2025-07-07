@@ -230,6 +230,10 @@ void SmartTrafficLight::sendInterest(const ndn::Interest& interest) {
 
 void SmartTrafficLight::onData(const ndn::Interest& interest, const ndn::Data& data) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_timeoutCounter > 0) {
+        log(LogLevel::DEBUG, "Contador de timeout zerado após comunicação bem-sucedida.");
+        m_timeoutCounter = 0;
+    }
     auto interestUri = data.getName().toUri();
     auto content = std::string(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
     log(LogLevel::DEBUG, "Recebeu Data de: " + data.getName().toUri());
@@ -261,48 +265,85 @@ std::vector<Command> SmartTrafficLight::parseContent(const std::string& rawComma
 }
 
 bool SmartTrafficLight::applyCommand(const Command& cmd) {
-    if (cmd.type == "") return false;
-    if (cmd.type == "set_state") {
-        if (cmd.value == "GREEN") current_color = Color::GREEN;
-        else if (cmd.value == "YELLOW") current_color = Color::YELLOW;
-        else if (cmd.value == "RED") current_color = Color::RED;
-        else current_color = Color::ALERT;
-        log(LogLevel::DEBUG, "Cor alterada para " + cmd.value);
-    }else if (cmd.type == "set_time") {
-        int newTime;
-        if (cmd.value == "DEFAULT") {
-            newTime = getDefaultColorTime(current_color);
-        } else {
-            newTime = std::stoi(cmd.value);
-        }
-        if (current_color == Color::ALERT){
-            time_left = newTime;
-        }
-        updateColorVectorTime(current_color, newTime);
-    }else if (cmd.type == "set_green_duration"){
-        int newTime = std::stoi(cmd.value)/1000;
-        updateColorVectorTime(Color::GREEN, newTime);
-        log(LogLevel::DEBUG, "Tempo verde alterado para " + std::to_string(newTime));
-    }else if (cmd.type == "set_red_duration"){
-        int newTime = std::stoi(cmd.value)/1000;
-        updateColorVectorTime(Color::RED, newTime);
-        log(LogLevel::DEBUG, "Tempo vermelho alterado para " + std::to_string(newTime));
-    }else if (cmd.type == "set_current_time"){
-        int newTime = std::stoi(cmd.value); 
-        time_left = newTime / 1000; 
-        log(LogLevel::DEBUG, "Tempo alterado para " + std::to_string(time_left));
-        auto now = std::chrono::steady_clock::now();
-    }else if (cmd.type == "increase_time") {
-        int increment = std::stoi(cmd.value);
-        time_left += increment/1000;
-        log(LogLevel::DEBUG, "Tempo aumentado em " + std::to_string(increment) + "s.");
-    }
-    else if (cmd.type == "decrease_time") {
-        int decrement = std::stoi(cmd.value);
-        time_left -= decrement/1000; 
-        log(LogLevel::DEBUG, "Tempo diminuido em " + std::to_string(decrement) + "s.");
-    }
-    return true;
+  if (cmd.type == "") return false;
+  if (cmd.type == "set_state") {
+      if (cmd.value == "GREEN") current_color = Color::GREEN;
+      else if (cmd.value == "YELLOW") current_color = Color::YELLOW;
+      else if (cmd.value == "RED") current_color = Color::RED;
+      else current_color = Color::ALERT;
+      log(LogLevel::DEBUG, "Cor alterada para " + cmd.value);
+  }else if (cmd.type == "set_time") {
+      int newTime;
+      if (cmd.value == "DEFAULT") {
+          newTime = getDefaultColorTime(current_color);
+      } else {
+          newTime = std::stoi(cmd.value);
+      }
+      if (current_color == Color::ALERT){
+          time_left = newTime;
+      }
+      updateColorVectorTime(current_color, newTime);
+  }else if (cmd.type == "set_default_duration"){
+      updateColorVectorTime(Color::GREEN, getDefaultColorTime(Color::GREEN));
+      updateColorVectorTime(Color::YELLOW, getDefaultColorTime(Color::YELLOW));
+      updateColorVectorTime(Color::RED, getDefaultColorTime(Color::RED));
+      log(LogLevel::INFO, "Durações de ciclo reconfiguradas para o padrão inicial.");
+  }
+  else if (cmd.type == "set_green_duration"){
+      int newTime = std::stoi(cmd.value)/1000;
+      updateColorVectorTime(Color::GREEN, newTime);
+      log(LogLevel::DEBUG, "Tempo verde alterado para " + std::to_string(newTime));
+  }
+  else if (cmd.type == "set_red_duration"){
+      int newTime = std::stoi(cmd.value)/1000;
+      updateColorVectorTime(Color::RED, newTime);
+      log(LogLevel::DEBUG, "Tempo vermelho alterado para " + std::to_string(newTime));
+  }
+  else if (cmd.type == "increase_green_duration"){
+      size_t index = static_cast<size_t>(Color::GREEN);
+      int increment = std::stoi(cmd.value)/1000;
+      colors_vector[index].second += increment;
+      log(LogLevel::DEBUG, "Duração do VERDE aumentada em " + std::to_string(increment) + "s. Nova duração: " + std::to_string(colors_vector[index].second) + "s.");
+  }
+  else if (cmd.type == "decrease_green_duration"){
+      size_t index = static_cast<size_t>(Color::GREEN);
+      int decrement = std::stoi(cmd.value)/1000;
+      if (colors_vector[index].second > decrement + 5) {
+          colors_vector[index].second -= decrement;
+          log(LogLevel::DEBUG, "Duração do VERDE diminuída em " + std::to_string(decrement) + "s. Nova duração: " + std::to_string(colors_vector[index].second) + "s.");
+      }
+  }
+  else if (cmd.type == "increase_red_duration"){
+      size_t index = static_cast<size_t>(Color::RED);
+      int increment = std::stoi(cmd.value)/1000;
+      colors_vector[index].second += increment;
+      log(LogLevel::DEBUG, "Duração do VERMELHO aumentada em " + std::to_string(increment) + "s. Nova duração: " + std::to_string(colors_vector[index].second) + "s.");
+  }
+  else if (cmd.type == "decrease_red_duration"){
+      size_t index = static_cast<size_t>(Color::RED);
+      int decrement = std::stoi(cmd.value)/1000;
+      if (colors_vector[index].second > decrement + 5) {
+          colors_vector[index].second -= decrement;
+          log(LogLevel::DEBUG, "Duração do VERMELHO diminuída em " + std::to_string(decrement) + "s. Nova duração: " + std::to_string(colors_vector[index].second) + "s.");
+      }
+  }
+  else if (cmd.type == "set_current_time"){
+      int newTime = std::stoi(cmd.value); 
+      time_left = newTime / 1000; 
+      log(LogLevel::DEBUG, "Tempo alterado para " + std::to_string(time_left));
+      auto now = std::chrono::steady_clock::now();
+  }
+  else if (cmd.type == "increase_time") {
+      int increment = std::stoi(cmd.value);
+      time_left += increment/1000;
+      log(LogLevel::DEBUG, "Tempo aumentado em " + std::to_string(increment) + "s.");
+  }
+  else if (cmd.type == "decrease_time") {
+      int decrement = std::stoi(cmd.value);
+      time_left -= decrement/1000; 
+      log(LogLevel::DEBUG, "Tempo diminuido em " + std::to_string(decrement) + "s.");
+  }
+  return true;
 }
 
 void SmartTrafficLight::updateColorVectorTime(Color color, int newTime) {
@@ -324,13 +365,32 @@ void SmartTrafficLight::onNack(const ndn::Interest& interest, const ndn::lp::Nac
   std::stringstream ss;
   ss << "NACK para " << interest.getName().toUri() << ". Motivo: " << nack.getReason();
   log(LogLevel::ERROR, ss.str());
+
+  std::lock_guard<std::mutex> lock(m_mutex);
+  current_color = Color::ALERT;
+  log(LogLevel::INFO, "Entrando em modo de ALERTA devido a NACK na comunicação.");
 }
 
 void SmartTrafficLight::onTimeout(const ndn::Interest& interest) {
   log(LogLevel::ERROR, "Timeout para " + interest.getName().toUri());
-}
-void SmartTrafficLight::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
-  log(LogLevel::ERROR, "Falha ao registrar prefixo: " + nome.toUri() + ". Motivo: " + reason);
 
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_timeoutCounter++;
+  log(LogLevel::DEBUG, "Contador de timeout: " + std::to_string(m_timeoutCounter));
+
+  if (m_timeoutCounter >= TIMEOUT_THRESHOLD) {
+    if (current_color != Color::ALERT) {
+      current_color = Color::ALERT;
+      log(LogLevel::INFO, "Entrando em modo de ALERTA após " + std::to_string(TIMEOUT_THRESHOLD) + " timeouts consecutivos.");
+    }
+  }
+}
+
+void SmartTrafficLight::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
+  log(LogLevel::ERROR, "Falha CRÍTICA ao registrar prefixo: " + nome.toUri() + ". Motivo: " + reason);
+  log(LogLevel::ERROR, "Não é possível continuar. Encerrando a aplicação.");
+
+  m_stopFlag = true; 
+  m_face.shutdown();
 }
 

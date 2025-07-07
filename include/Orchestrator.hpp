@@ -7,7 +7,7 @@
 namespace config {
   constexpr int INCREASE_GREEN_MS = 5000;
   constexpr int DECREASE_RED_MS = 3000;
-  constexpr int MIN_PRIORITY = 20;
+  constexpr float MIN_PRIORITY = 20.0;
   constexpr int YELLOW_TIME_MS = 3000;
   constexpr int GREEN_BASE_TIME_MS = 15000;
   constexpr int RTT_WINDOW_SIZE = 10;
@@ -46,7 +46,8 @@ namespace config {
 // Includes do Projeto
 // =================================================================================
 #include "ProConInterface.hpp" 
-#include "Structs.hpp"         
+#include "Structs.hpp"   
+#include "LogLevel.hpp"       
 
 class Orchestrator : public ndn::ProConInterface {
 public:
@@ -56,10 +57,11 @@ public:
   Orchestrator(const Orchestrator&) = delete;
   Orchestrator& operator=(const Orchestrator&) = delete;
 
-  void loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
+  void loadConfig(const std::map<std::string, TrafficLightState>& trafficLights,
                     const std::map<std::string, Intersection>& intersections,
                     const std::vector<GreenWaveGroup>& greenWaves,
-                    const std::vector<SyncGroup>& syncGroups);
+                    const std::vector<SyncGroup>& syncGroups,
+                    LogLevel level);
 
   void setup(const std::string& prefix) override;
   void run() override;
@@ -81,16 +83,20 @@ private:
   void cycle();
   void produce(const std::string& trafficLightName, const ndn::Interest& interest);
   
-  void generateSyncCommand(const Intersection& intersection, const std::string& requesterName);
+  void generateIntersectionCommand(const Intersection& intersection, const std::string& requesterName);
   void forceCycleStart(const std::string& intersectionName);
-  void processActiveGreenWave(const GreenWaveGroup& wave);
+  void processGreenWaves();
   void processSyncGroups();
+  void assignPriorityCommands();
+  void processIntersections(const int& allRedTimeoutCycles);
 
   void updatePriorityList(const std::string& intersectionName);
   
   int recordRTT(const std::string& interestName);
   int getAverageRTT() const;
   const Intersection* findIntersectionFor(const std::string& lightName) const;
+
+  void log(LogLevel level, const std::string& message);
 
 private:
   boost::asio::io_context m_ioCtx;
@@ -119,6 +125,8 @@ private:
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
   std::map<std::string, int> m_allRedCounter;
   std::vector<int> rttHistory_;
+
+  LogLevel m_logLevel = LogLevel::NONE;
 };
 
 #endif // ORCHESTRATOR_HPP

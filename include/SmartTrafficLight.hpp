@@ -96,6 +96,8 @@ private:
 
     LogLevel m_logLevel = LogLevel::NONE;
 
+    int m_timeoutCounter = 0;
+    static constexpr int TIMEOUT_THRESHOLD = 3;
 };
 
 #endif // SMART_TRAFFIC_LIGHT_HPP
