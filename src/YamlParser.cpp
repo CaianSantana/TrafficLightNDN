@@ -60,7 +60,7 @@ void YamlParser::parse(const YAML::Node& config) {
             wave.name = node["name"].as<std::string>();
             wave.trafficLightNames = node["traffic_lights"].as<std::vector<std::string>>();
             wave.travelTimeMs = node["travel_time_ms"].as<int>();
-            greenWaves.push_back(wave);
+            greenWaves[wave.name]=wave;
         }
     }
     if (config["sync_groups"]) {
@@ -68,7 +68,7 @@ void YamlParser::parse(const YAML::Node& config) {
             SyncGroup sync;
             sync.name = node["name"].as<std::string>();
             sync.trafficLightNames = node["traffic_lights"].as<std::vector<std::string>>();
-            syncGroups.push_back(sync);
+            syncGroups[sync.name]=sync;
         }
     }
 }
@@ -83,11 +83,11 @@ const std::map<std::string, Intersection>& YamlParser::getIntersections() const 
     return intersections;
 }
 
-const std::vector<GreenWaveGroup>& YamlParser::getGreenWaves()  const {
+const std::map<std::string, GreenWaveGroup>& YamlParser::getGreenWaves()  const {
     return greenWaves;
 }
 
-const std::vector<SyncGroup>& YamlParser::getSyncGroups() const {
+const std::map<std::string, SyncGroup>& YamlParser::getSyncGroups() const {
     return syncGroups;
 }
 

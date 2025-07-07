@@ -58,8 +58,8 @@ public:
 
   void loadTopology(const std::map<std::string, TrafficLightState>& trafficLights,
                     const std::map<std::string, Intersection>& intersections,
-                    const std::vector<GreenWaveGroup>& greenWaves,
-                    const std::vector<SyncGroup>& syncGroups);
+                    const std::map<std::string, GreenWaveGroup>& greenWaves,
+                    const std::map<std::string, SyncGroup>& syncGroups);
 
   void setup(const std::string& prefix) override;
   void run() override;
@@ -82,9 +82,9 @@ private:
   void produce(const std::string& trafficLightName, const ndn::Interest& interest);
   
   void generateSyncCommand(const Intersection& intersection, const std::string& requesterName);
-  void forceCycleStart(const std::string& intersectionName);
-  void processActiveGreenWave(const GreenWaveGroup& wave);
-  void processSyncGroups();
+  void startNextCyclePhase(const std::string& intersectionName);
+  void processGreenWaveFor(const std::string& lightName);
+  void processSyncGroupFor(const std::string& lightName);
 
   void updatePriorityList(const std::string& intersectionName);
   
@@ -103,22 +103,25 @@ private:
   
   std::jthread m_cycleThread;
   std::atomic_bool m_stopFlag{false};
-  mutable std::mutex mutex_;
+  mutable std::mutex m_mutex;
 
   std::string prefix_;
-  std::map<std::string, TrafficLightState> trafficLights_;
-  std::map<std::string, Intersection> intersections_;
-  std::vector<GreenWaveGroup> greenWaves_;
-  std::vector<SyncGroup> syncGroups_;
-  std::map<std::string, std::vector<std::pair<std::string, int>>> sortedPriorityCache_;
+  std::map<std::string, TrafficLightState> m_trafficLights;
+  std::map<std::string, Intersection> m_intersections;
+  std::map<std::string, GreenWaveGroup> m_greenWaves;
+  std::map<std::string, SyncGroup> m_syncGroups;
+  std::unordered_map<std::string, std::string> m_lightToIntersection;
+  std::unordered_map<std::string, std::string> m_lightToWave;
+  std::unordered_map<std::string, std::string> m_lightToSyncGroup;
+  std::map<std::string, std::vector<std::pair<std::string, int>>> m_sortedPriorityCache;
   std::map<std::string, std::chrono::steady_clock::time_point> m_lastPriorityCommandTime;
   std::map<std::string, std::string> m_activeLightPerIntersection;
 
   
   std::string lastModified;
-  std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_interestTimestamps;
   std::map<std::string, int> m_allRedCounter;
-  std::vector<int> rttHistory_;
+  std::vector<int> m_rttHistory;
 };
 
 #endif // ORCHESTRATOR_HPP
