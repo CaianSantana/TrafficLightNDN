@@ -68,7 +68,10 @@ private:
     ndn::ScopedRegisteredPrefixHandle m_certServeHandle;
     ndn::ValidatorConfig m_validator;
     ndn::Scheduler m_scheduler{m_ioCtx};
-    std::mutex m_mutex; 
+    std::mutex m_mutex;
+    std::string m_lastCommandContent;
+    std::chrono::steady_clock::time_point m_lastCommandTimestamp;
+ 
 
     std::string central;
     std::string prefix_;

@@ -29,6 +29,8 @@ namespace config {
 #include <chrono> 
 #include <optional>
 #include <cstddef>
+#include <fstream>
+#include <numeric>
 
 // =================================================================================
 // Includes da Biblioteca NDN-CXX
@@ -91,6 +93,8 @@ private:
   void processIntersections(const int& allRedTimeoutCycles);
 
   void updatePriorityList(const std::string& intersectionName);
+  float calculateAveragePriority() const;
+  void appendToMetricsFile(int rtt_ms);
   
   int recordRTT(const std::string& interestName);
   int getAverageRTT() const;
@@ -125,6 +129,7 @@ private:
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> interestTimestamps_;
   std::map<std::string, int> m_allRedCounter;
   std::vector<int> rttHistory_;
+  std::string m_metricsFilename; 
 
   LogLevel m_logLevel = LogLevel::NONE;
 };

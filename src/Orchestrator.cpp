@@ -6,9 +6,10 @@
 Orchestrator::Orchestrator()
   : m_face(m_ioCtx),
     m_validator(m_face),
-    m_scheduler(m_ioCtx)
+    m_scheduler(m_ioCtx),
+    m_metricsFilename("metrics/rtt.csv") 
 {
-  m_validator.load("../config/trust-schema.conf");
+  m_validator.load("config/trust-schema.conf");
 }
 
 Orchestrator::~Orchestrator() {
@@ -76,10 +77,30 @@ void Orchestrator::loadConfig(const std::map<std::string, TrafficLightState>& tr
 }
 
 void Orchestrator::run() {
+  // Garante que o arquivo de métricas tenha um cabeçalho no início da execução
+  std::ofstream outFile(m_metricsFilename, std::ios_base::trunc); // trunc apaga o conteúdo anterior
+  if (outFile.is_open()) {
+    outFile << "rtt_ms\n"; // Escreve o cabeçalho do CSV
+    outFile.close();
+    log(LogLevel::INFO, "Arquivo de métricas '" + m_metricsFilename + "' inicializado.");
+  } else {
+    log(LogLevel::ERROR, "Não foi possível inicializar o arquivo de métricas: " + m_metricsFilename);
+  }
+
   m_scheduler.schedule(ndn::time::seconds(1), [this]{ runConsumer(); });
   runProducer("command");
   m_cycleThread = std::jthread([this] { this->cycle(); }); 
   m_face.processEvents();
+}
+
+void Orchestrator::appendToMetricsFile(int rtt_ms) {
+    std::ofstream outFile(m_metricsFilename, std::ios_base::app);
+    if (!outFile.is_open()) {
+        log(LogLevel::ERROR, "Falha ao abrir o arquivo de métricas para escrita: " + m_metricsFilename);
+        return;
+    }
+    outFile << rtt_ms << "\n";
+    outFile.close();
 }
 
 void Orchestrator::log(LogLevel level, const std::string& message) {
@@ -136,7 +157,6 @@ void Orchestrator::runProducer(const std::string& suffix){
 
 
 void Orchestrator::onInterest(const ndn::Interest& interest) {
-  std::lock_guard<std::mutex> lock(mutex_);
   const auto& name = interest.getName();
   bool isCommand = false;
   std::string trafficLightName;
@@ -166,16 +186,23 @@ void Orchestrator::onInterest(const ndn::Interest& interest) {
   }
 }
 
-
 void Orchestrator::produce(const std::string& trafficLightName, const ndn::Interest& interest) {
+  log(LogLevel::INFO, "Processando comando para " + trafficLightName);
+  std::string command;
   auto data = std::make_shared<ndn::Data>(interest.getName());
-  data->setContent(std::string_view(trafficLights_.at(trafficLightName).command)); 
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        command = trafficLights_.at(trafficLightName).command;
+        trafficLights_.at(trafficLightName).command = "";
+    }
+  data->setContent(std::string_view(command)); 
   data->setFreshnessPeriod(ndn::time::seconds(1));
-  trafficLights_.at(trafficLightName).command = "";
-  log(LogLevel::DEBUG, "Enviando Interest para: " + interest.getName().toUri());
+
   m_keyChain.sign(*data);
   m_face.put(*data);
 }
+
+
 
 void Orchestrator::onRegisterFailed(const ndn::Name& nome, const std::string& reason) {
   log(LogLevel::ERROR, "Falha ao registrar prefixo: " + nome.toUri() + " Motivo: " + reason);
@@ -189,14 +216,14 @@ void Orchestrator::runConsumer() {
     for (const auto& [name, state] : trafficLights_) {
       if (!state.isUnknown()) {
         Name interestName(name);
-        auto interest = createInterest(interestName, true, false, 900_ms); 
+        auto interest = createInterest(interestName, true, false, 4000_ms); 
         sendInterest(interest);
       }
       else {
         if (m_cycleCount % 5 == 0) {
             log(LogLevel::INFO, "Tentando contactar o nó falho: " + name);
             Name interestName(name);
-            auto interest = createInterest(name, true, false, 900_ms);
+            auto interest = createInterest(name, true, false, 4000_ms);
             sendInterest(interest);
         }
       }
@@ -344,12 +371,15 @@ int Orchestrator::recordRTT(const std::string& interestName) {
 
     int rttMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second).count();
     
+    appendToMetricsFile(rttMs);
+
     rttHistory_.push_back(rttMs);
     if (rttHistory_.size() > config::RTT_WINDOW_SIZE) {
         rttHistory_.erase(rttHistory_.begin());
     }
     return rttMs / 2;
 }
+
 
 const Intersection* Orchestrator::findIntersectionFor(const std::string& lightName) const {
     for (const auto& [intersectionName, intersection] : intersections_) {
@@ -415,6 +445,20 @@ void Orchestrator::updatePriorityList(const std::string& intersectionName) {
         return a.second > b.second;
     });
 }
+
+float Orchestrator::calculateAveragePriority() const {
+    if (trafficLights_.empty()) {
+        return 15.0f; 
+    }
+
+    double sumOfPriorities = 0.0;
+    for (const auto& pair : trafficLights_) {
+        sumOfPriorities += pair.second.priority;
+    }
+
+    return static_cast<float>(sumOfPriorities / trafficLights_.size());
+}
+
 
 void Orchestrator::generateIntersectionCommand(const Intersection& intersection, const std::string& requesterName) {
     auto now = std::chrono::steady_clock::now();
@@ -619,6 +663,8 @@ void Orchestrator::processSyncGroups() {
 
 
 void Orchestrator::assignPriorityCommands() {
+    float averagePriority = calculateAveragePriority();
+
     for (auto& [currentLightName, light] : trafficLights_) {
         if (light.isAlert() && !light.partOfIntersection) {
             light.command += ";set_default_duration;set_state:RED;set_current_time:15000"; 
@@ -630,9 +676,9 @@ void Orchestrator::assignPriorityCommands() {
 
         auto& adjustment = light.adjustment_state;
         const int MAX_ADJUSTMENTS = 3;
-        const std::string ADJUSTMENT_VALUE_S = "5"; 
+        const std::string ADJUSTMENT_VALUE_MS = "5000"; 
 
-        if (light.priority >= config::MIN_PRIORITY) {
+        if (light.priority > averagePriority) {
             if (adjustment.second == false) { 
                 if (adjustment.first > 0) {
                     adjustment.first--;
@@ -640,19 +686,20 @@ void Orchestrator::assignPriorityCommands() {
                 } else { 
                     adjustment.second = true;
                     adjustment.first = 1;
-                    light.command += ";increase_green_duration:" + ADJUSTMENT_VALUE_S + ";decrease_red_duration:" + ADJUSTMENT_VALUE_S;
+                    light.command += ";increase_green_duration:" + ADJUSTMENT_VALUE_MS + ";decrease_red_duration:" + ADJUSTMENT_VALUE_MS;
                     log(LogLevel::INFO, light.name + " (P:" + std::to_string(light.priority) + ") inverteu tendência para GANHAR tempo.");
                 }
             } else { 
                 if (adjustment.first < MAX_ADJUSTMENTS) {
                     adjustment.first++;
-                    light.command += ";increase_green_duration:" + ADJUSTMENT_VALUE_S + ";decrease_red_duration:" + ADJUSTMENT_VALUE_S;
+                    light.command += ";increase_green_duration:" + ADJUSTMENT_VALUE_MS + ";decrease_red_duration:" + ADJUSTMENT_VALUE_MS;
                     log(LogLevel::DEBUG, light.name + " continua a ganhar tempo. Contador: " + std::to_string(adjustment.first));
                 } else {
                     log(LogLevel::DEBUG, light.name + " no limite de ganho de tempo.");
                 }
             }
-        } else {
+        } else if (light.priority == averagePriority) continue;
+        else {
             if (adjustment.second == true) {
                 if (adjustment.first > 0) { 
                     adjustment.first--;
@@ -660,13 +707,13 @@ void Orchestrator::assignPriorityCommands() {
                 } else { 
                     adjustment.second = false;
                     adjustment.first = 1;
-                    light.command += ";decrease_green_duration:" + ADJUSTMENT_VALUE_S + ";increase_red_duration:" + ADJUSTMENT_VALUE_S;
+                    light.command += ";decrease_green_duration:" + ADJUSTMENT_VALUE_MS + ";increase_red_duration:" + ADJUSTMENT_VALUE_MS;
                     log(LogLevel::INFO, light.name + " (P:" + std::to_string(light.priority) + ") inverteu tendência para CEDER tempo.");
                 }
             } else {
                 if (adjustment.first < MAX_ADJUSTMENTS) {
                     adjustment.first++;
-                    light.command += ";decrease_green_duration:" + ADJUSTMENT_VALUE_S + ";increase_red_duration:" + ADJUSTMENT_VALUE_S;
+                    light.command += ";decrease_green_duration:" + ADJUSTMENT_VALUE_MS + ";increase_red_duration:" + ADJUSTMENT_VALUE_MS;
                     log(LogLevel::DEBUG, light.name + " continua a ceder tempo. Contador: " + std::to_string(adjustment.first));
                 } else {
                     log(LogLevel::DEBUG, light.name + " no limite de cessão de tempo.");

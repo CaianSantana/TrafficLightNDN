@@ -1,12 +1,11 @@
 #include "../include/SmartTrafficLight.hpp"
 
-
 using namespace std::chrono;
 
 SmartTrafficLight::SmartTrafficLight() 
    : m_validator(m_face)
 {
-    m_validator.load("../config/trust-schema.conf");
+    m_validator.load("config/trust-schema.conf");
 }
 
 SmartTrafficLight::~SmartTrafficLight() {
@@ -64,15 +63,8 @@ void SmartTrafficLight::run() {
     index = static_cast<size_t>(start_color);
     runProducer("");
     runConsumer();
-    std::thread([this] {
-     this->cycle();
-    }).detach();
+    m_cycleThread = std::thread([this] { this->cycle(); });
     m_face.processEvents();
-}
-
-void SmartTrafficLight::startCycle() {
-  m_stopFlag = false; 
-  m_cycleThread = std::thread(&SmartTrafficLight::cycle, this);
 }
 
 void SmartTrafficLight::cycle() {
@@ -80,8 +72,10 @@ void SmartTrafficLight::cycle() {
     if (current_color == Color::ALERT) {
       log(LogLevel::DEBUG, "Estado de ALERTA ativo.");
       generateTraffic();
-      std::lock_guard<std::mutex> lock(m_mutex);
-      passVehicles();
+      {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        passVehicles();
+      }
       std::this_thread::sleep_for(std::chrono::seconds(1));
       continue;
     }
@@ -162,7 +156,7 @@ void SmartTrafficLight::generateTraffic() {
 
 void SmartTrafficLight::runConsumer() {
     m_scheduler.schedule(1000_ms, [this] {
-        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 1000_ms);
+        auto interestCommand = createInterest(central + "/command"+prefix_, true, false, 4000_ms);
         sendInterest(interestCommand);
         runConsumer();
     });
@@ -199,7 +193,7 @@ void SmartTrafficLight::onInterest(const ndn::Interest& interest) {
     std::string content = oss.str();
 
     auto data = std::make_shared<ndn::Data>(interest.getName());
-    data->setContent(std::string_view(content));
+    data->setContent(ndn::make_span(reinterpret_cast<const uint8_t*>(content.data()), content.size()));
     data->setFreshnessPeriod(ndn::time::seconds(1));
 
     m_keyChain.sign(*data);
@@ -229,17 +223,30 @@ void SmartTrafficLight::sendInterest(const ndn::Interest& interest) {
 
 
 void SmartTrafficLight::onData(const ndn::Interest& interest, const ndn::Data& data) {
+    auto now = std::chrono::steady_clock::now();
+    const auto content = std::string(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
+    const auto DUPLICATION_WINDOW = std::chrono::seconds(4);
+
     std::lock_guard<std::mutex> lock(m_mutex);
+    
+    if (!content.empty() && content == m_lastCommandContent && (now - m_lastCommandTimestamp) < DUPLICATION_WINDOW) {
+        return; 
+    }
+    
+    
+    if (!content.empty()) {
+        m_lastCommandContent = content;
+        m_lastCommandTimestamp = now;
+    }
+
     if (m_timeoutCounter > 0) {
         log(LogLevel::DEBUG, "Contador de timeout zerado após comunicação bem-sucedida.");
         m_timeoutCounter = 0;
     }
-    auto interestUri = data.getName().toUri();
-    auto content = std::string(reinterpret_cast<const char*>(data.getContent().value()), data.getContent().value_size());
+
     log(LogLevel::DEBUG, "Recebeu Data de: " + data.getName().toUri());
     std::vector<Command> commands = parseContent(content);
     for (const auto& cmd : commands) {
-        
         if(!applyCommand(cmd))
             break;
     }
@@ -250,7 +257,13 @@ std::vector<Command> SmartTrafficLight::parseContent(const std::string& rawComma
     std::istringstream ss(rawCommand);
     std::string commandStr;
 
+    // Ignora o primeiro caractere se for um delimitador
+    if (!ss.str().empty() && ss.str()[0] == ';') {
+        ss.ignore(1);
+    }
+
     while (std::getline(ss, commandStr, ';')) {
+        if (commandStr.empty()) continue;
         auto sep = commandStr.find(':');
         if (sep == std::string::npos)
             continue;
@@ -265,13 +278,13 @@ std::vector<Command> SmartTrafficLight::parseContent(const std::string& rawComma
 }
 
 bool SmartTrafficLight::applyCommand(const Command& cmd) {
-  if (cmd.type == "") return false;
+  if (cmd.type.empty()) return false;
   if (cmd.type == "set_state") {
-      if (cmd.value == "GREEN") current_color = Color::GREEN;
-      else if (cmd.value == "YELLOW") current_color = Color::YELLOW;
-      else if (cmd.value == "RED") current_color = Color::RED;
-      else current_color = Color::ALERT;
-      log(LogLevel::DEBUG, "Cor alterada para " + cmd.value);
+      Color new_color = parseColor(cmd.value);
+      if (new_color != current_color) {
+        current_color = new_color;
+        log(LogLevel::DEBUG, "Cor alterada para " + cmd.value);
+      }
   }else if (cmd.type == "set_time") {
       int newTime;
       if (cmd.value == "DEFAULT") {
@@ -393,4 +406,3 @@ void SmartTrafficLight::onRegisterFailed(const ndn::Name& nome, const std::strin
   m_stopFlag = true; 
   m_face.shutdown();
 }
-
