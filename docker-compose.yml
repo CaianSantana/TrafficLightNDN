@@ -7,10 +7,11 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
+      - ./scenarios:/app/scenarios:ro
       - ./config:/app/config:ro
     environment:
       - ROLE=orchestrator
-    command: ["orchestrator", "/app/config/inicio-cabula.yaml", "DEBUG"]
+    command: ["orchestrator", "/app/scenarios/cabula.yaml", "DEBUG"]
 
   trafficlight-0:
     build: .
@@ -20,10 +21,11 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
+      - ./scenarios:/app/scenarios:ro
       - ./config:/app/config:ro
     environment:
       - ROLE=trafficlight
-    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "0", "INFO"]
+    command: ["trafficLight", "/app/scenarios/cabula.yaml", "0", "INFO"]
 
   trafficlight-1:
     build: .
@@ -33,10 +35,11 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
+      - ./scenarios:/app/scenarios:ro
       - ./config:/app/config:ro
     environment:
       - ROLE=trafficlight
-    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "1", "INFO"]
+    command: ["trafficLight", "/app/scenarios/cabula.yaml", "1", "INFO"]
   
   trafficlight-2:
     build: .
@@ -46,10 +49,11 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
+      - ./scenarios:/app/scenarios:ro
       - ./config:/app/config:ro
     environment:
       - ROLE=trafficlight
-    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "2", "INFO"]
+    command: ["trafficLight", "/app/scenarios/cabula.yaml", "2", "INFO"]
     
   trafficlight-3:
     build: .
@@ -59,10 +63,11 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
+      - ./scenarios:/app/scenarios:ro
       - ./config:/app/config:ro
     environment:
       - ROLE=trafficlight
-    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "3", "INFO"]
+    command: ["trafficLight", "/app/scenarios/cabula.yaml", "3", "INFO"]
 
   trafficlight-4:
     build: .
@@ -72,10 +77,11 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
+      - ./scenarios:/app/scenarios:ro
       - ./config:/app/config:ro
     environment:
       - ROLE=trafficlight
-    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "4", "INFO"]
+    command: ["trafficLight", "/app/scenarios/cabula.yaml", "4", "INFO"]
 
 networks:
   ndn_network:

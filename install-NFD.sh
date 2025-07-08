@@ -46,6 +46,7 @@ function install_requirements(){
 }
 
 function install_ndn-cxx(){
+    cd "${HOME}" || exit
     echo "--- Cloning and installing ndn-cxx... ---"
     git clone https://github.com/named-data/ndn-cxx.git
     cd ndn-cxx/ || exit 1
@@ -58,11 +59,10 @@ function install_ndn-cxx(){
         echo "--- Running ldconfig (Linux only) ---"
         sudo ldconfig
     fi
-    
-    cd ..
 }
 
 function install_NFD(){
+    cd "${HOME}" || exit
     echo "--- Cloning and installing NFD... ---"
     git clone --recursive https://github.com/named-data/NFD.git
     cd NFD/ || exit 1
@@ -75,11 +75,8 @@ function install_NFD(){
         echo "--- Running ldconfig (Linux only) ---"
         sudo ldconfig
     fi
-
-    cd ..
 }
 
-# --- Main Execution Logic ---
 function main(){
     install_requirements
 

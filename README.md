@@ -119,6 +119,7 @@ cd build/
 export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
 cmake ..
 make
+mv orchestrator trafficLight ..
 ```
 
 
@@ -127,8 +128,22 @@ make
 Execute o Orquestrador:
 
 ```bash
-./orchestrator
+cd ..
+./orchestrator <caminho_yaml> <log_level>
 ```
+Níveis de log disponíveis: NONE, ERROR, INFO, DEBUG
+
+---
+### 4.3 Execução do(s) Semáforo(s)
+
+Execute o Orquestrador:
+
+```bash
+cd ..
+./trafficLight <caminho_yaml> <id_semaforo> <log_level>
+
+```
+Níveis de log disponíveis: NONE, ERROR, INFO, DEBUG
 
 ---
 
