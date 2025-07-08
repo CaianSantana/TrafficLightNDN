@@ -1,0 +1,82 @@
+services:
+  orchestrator:
+    build: .
+    container_name: orchestrator
+    networks:
+      - ndn_network
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ROLE=orchestrator
+    command: ["orchestrator", "/app/config/inicio-cabula.yaml", "DEBUG"]
+
+  trafficlight-0:
+    build: .
+    container_name: trafficlight-0
+    networks:
+      - ndn_network
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ROLE=trafficlight
+    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "0", "INFO"]
+
+  trafficlight-1:
+    build: .
+    container_name: trafficlight-1
+    networks:
+      - ndn_network
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ROLE=trafficlight
+    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "1", "INFO"]
+  
+  trafficlight-2:
+    build: .
+    container_name: trafficlight-2
+    networks:
+      - ndn_network
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ROLE=trafficlight
+    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "2", "INFO"]
+    
+  trafficlight-3:
+    build: .
+    container_name: trafficlight-3
+    networks:
+      - ndn_network
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ROLE=trafficlight
+    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "3", "INFO"]
+
+  trafficlight-4:
+    build: .
+    container_name: trafficlight-4
+    networks:
+      - ndn_network
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ROLE=trafficlight
+    command: ["trafficLight", "/app/config/inicio-cabula.yaml", "4", "INFO"]
+
+networks:
+  ndn_network:
+    driver: bridge

@@ -1,6 +1,6 @@
 build/
 .git/
-.vscode/
+.gitignore
 Dockerfile
+docker-compose.yml
 *.md
-install-NFD.sh
