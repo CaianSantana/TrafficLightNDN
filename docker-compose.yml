@@ -9,6 +9,7 @@ services:
     volumes:
       - ./scenarios:/app/scenarios:ro
       - ./config:/app/config:ro
+      - ./metrics:/app/metrics
     environment:
       - ROLE=orchestrator
     command: ["orchestrator", "/app/${SCENARIO_FILE}", "DEBUG"]
