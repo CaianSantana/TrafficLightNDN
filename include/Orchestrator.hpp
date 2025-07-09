@@ -59,7 +59,7 @@ public:
   Orchestrator(const Orchestrator&) = delete;
   Orchestrator& operator=(const Orchestrator&) = delete;
 
-  void loadConfig(const std::map<std::string, TrafficLightState>& trafficLights,
+  void loadConfig(const std::vector<std::pair<std::string, TrafficLightState>>& trafficLights,
                     const std::map<std::string, Intersection>& intersections,
                     const std::vector<GreenWaveGroup>& greenWaves,
                     const std::vector<SyncGroup>& syncGroups,
@@ -99,6 +99,7 @@ private:
   int recordRTT(const std::string& interestName);
   int getAverageRTT() const;
   const Intersection* findIntersectionFor(const std::string& lightName) const;
+  TrafficLightState* findTrafficLight(const std::string& name);
 
   void log(LogLevel level, const std::string& message);
 
@@ -116,7 +117,7 @@ private:
   mutable std::mutex mutex_;
 
   std::string prefix_;
-  std::map<std::string, TrafficLightState> trafficLights_;
+  std::vector<TrafficLightState> trafficLights_;
   std::map<std::string, Intersection> intersections_;
   std::vector<GreenWaveGroup> greenWaves_;
   std::vector<SyncGroup> syncGroups_;

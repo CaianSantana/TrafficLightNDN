@@ -1,0 +1,57 @@
+traffic-lights:
+
+  - name: "/ssa/largo-dois-leoes/s-bx-quintas/1"
+    cycle_time: 60
+    state: "GREEN"
+    columns: 3
+    lines: 2
+    intensity: "HIGH" 
+
+  - name: "/ssa/r-conego-pereira/s-sete-portas/1"
+    cycle_time: 60
+    state: "GREEN"
+    columns: 3
+    lines: 2
+    intensity: "HIGH" 
+
+  - name: "/ssa/r-conego-pereira/s-sete-portas/2"
+    cycle_time: 30
+    state: "GREEN"
+    columns: 3
+    lines: 2
+    intensity: "MEDIUM"
+
+  - name: "/ssa/av-glauber-rocha/s-bx-quintas/1"
+    cycle_time: 60
+    state: "RED"
+    columns: 3
+    lines: 2
+    intensity: "LOW" 
+    
+  - name: "/ssa/largo-dois-leoes/s-sete-portas/1"
+    cycle_time: 60
+    state: "RED"
+    columns: 3
+    lines: 2
+    intensity: "LOW" 
+
+intersections:
+  - name: "dois-leoesxconego-pereira"
+    traffic-lights: ["/ssa/largo-dois-leoes/s-bx-quintas/1","/ssa/r-conego-pereira/s-sete-portas/1"]
+  
+green_waves:
+  - name: "conego-pereira"
+    traffic_lights:
+      - "/ssa/r-conego-pereira/s-sete-portas/1"
+      - "/ssa/r-conego-pereira/s-sete-portas/2"
+    travel_time_ms: 3000
+
+sync_groups:
+  - name: "conego-pereiraxglauber-rocha"
+    traffic_lights:
+      - "/ssa/r-conego-pereira/s-sete-portas/1"
+      - "/ssa/av-glauber-rocha/s-bx-quintas/1" 
+  - name: "conego-pereiraxdois-leoes"
+    traffic_lights:
+      - "/ssa/r-conego-pereira/s-sete-portas/2"
+      - "/ssa/largo-dois-leoes/s-sete-portas/1" 

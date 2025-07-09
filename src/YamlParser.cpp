@@ -47,7 +47,8 @@ void YamlParser::parse(const YAML::Node& config) {
         }
 
         light.endTime = std::chrono::steady_clock::now() + std::chrono::seconds(duration);
-        trafficLights[name] = light;
+
+        trafficLights.push_back({name, light});
     }
     if (config["intersections"]) {
         for (const auto& node : config["intersections"]) {
@@ -106,7 +107,7 @@ void YamlParser::parse(const YAML::Node& config) {
 
 
 
-const std::map<std::string, TrafficLightState>& YamlParser::getTrafficLights() const {
+const std::vector<std::pair<std::string, TrafficLightState>>& YamlParser::getTrafficLights() const {
     return trafficLights;
 }
 
@@ -126,8 +127,6 @@ std::optional<TrafficLightState> YamlParser::getTrafficLightByIndex(int index) c
     if (index < 0 || index >= static_cast<int>(trafficLights.size())) {
         return std::nullopt;
     }
-
-    auto it = trafficLights.begin();
-    std::advance(it, index);
-    return it->second;
+    return trafficLights[index].second;
 }
+
